@@ -1,7 +1,12 @@
 # codex-chatgpt-control
 
-[![Node CI](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/node.yml/badge.svg)](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/node.yml)
-[![Parity CI](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/parity.yml/badge.svg)](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/parity.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/adamallcock/codex-chatgpt-control/parity.yml?branch=main&label=CI&logo=github)](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/parity.yml)
+![release](https://img.shields.io/badge/release-source%20alpha-orange)
+![npm](https://img.shields.io/badge/npm-not%20published-lightgrey?logo=npm)
+![PyPI](https://img.shields.io/badge/pypi-not%20published-lightgrey?logo=pypi)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Node](https://img.shields.io/badge/Node-20%2B-green)
 
 Unofficial alpha SDK facade for Codex agents that need to run user-directed workflows in a visible ChatGPT web session.
 
