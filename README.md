@@ -10,8 +10,19 @@
 
 Unofficial alpha SDK facade for Codex agents that need to run user-directed workflows in a visible ChatGPT web session.
 
-- **Visible-session only:** drives chatgpt.com through a compatible Codex/browser bridge and user-visible UI controls, including file uploads and visible downloads where available.
-- **Workflow primitives, not a ChatGPT API:** supports prompts, thread workflows, response capture, structured blockers, and redacted run reports without private endpoint access.
+## Why This Exists
+
+This project exists because Codex and ChatGPT are useful in different parts of the same work loop. Codex is the execution environment: it can read and edit the local repo, run commands, test changes, and prepare branches. ChatGPT, meanwhile, may expose different frontier models, Pro-tier reasoning modes, larger context windows, canvases, connectors, browsing/research tools, memory, or company knowledge at any given time.
+
+In practice, that means a user can end up doing real work by hand across two surfaces:
+
+> I am flicking between Codex for execution, and ChatGPT with Pro for deep planning, information gathering, consensus building, branding, and research tasks.
+
+`codex-chatgpt-control` turns that manual tab switch into a structured, visible, user-directed bridge. It lets an agent stay inside Codex while asking ChatGPT web to help with the kinds of work where ChatGPT may currently be the stronger product surface: deep planning, long-context review, research synthesis, naming, positioning, brainstorming, design critique, and second-opinion analysis.
+
+- **Keep Codex as home base:** preserve the local execution loop while optionally consulting ChatGPT web for planning or research-heavy steps.
+- **Visible-session only:** drive chatgpt.com through a compatible Codex/browser bridge and user-visible UI controls, including file uploads and visible downloads where available.
+- **Workflow primitives, not a ChatGPT API:** support prompts, thread workflows, response capture, structured blockers, and redacted run reports without private endpoint access.
 - **Narrow by design:** built for Codex -> browser -> chatgpt.com workflows; it is not a generic browser automation framework, scraping tool, OpenAI API wrapper, or official OpenAI project.
 
 This project is not affiliated with, endorsed by, or sponsored by OpenAI.
