@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createChatGPT } from "../../src/client.js";
-import { validateResponsesCreateArgs } from "../../src/runner/responses.js";
+import { responsesCreateArgsToRunInput, validateResponsesCreateArgs } from "../../src/runner/responses.js";
 
 describe("Responses adapter validation", () => {
   it("accepts browser-compatible response fields", () => {
@@ -10,12 +10,32 @@ describe("Responses adapter validation", () => {
       attachments: [{ path: "/tmp/context.md" }],
       mode: { effort: "Thinking" },
       tools: [{ tool: "web_search" }],
+      existingTab: true,
+      preferExistingTab: true,
       text: { format: "markdown" },
       stream: false,
       report: false
     });
 
     expect(result.ok).toBe(true);
+  });
+
+  it("maps existing-tab fields into runner input", () => {
+    const input = responsesCreateArgsToRunInput({
+      input: "Continue.",
+      thread: { type: "url", url: "https://chatgpt.com/c/abc-123" },
+      existingTab: true,
+      preferExistingTab: true,
+      text: { format: "markdown" }
+    });
+
+    expect(input).toMatchObject({
+      input: "Continue.",
+      thread: { type: "url", url: "https://chatgpt.com/c/abc-123" },
+      existingTab: true,
+      preferExistingTab: true,
+      response: { format: "markdown" }
+    });
   });
 
   it.each([

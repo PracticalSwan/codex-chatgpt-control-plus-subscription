@@ -33,6 +33,33 @@ describe("existing Chrome tab bootstrap", () => {
     ]);
   });
 
+  it("uses user-open Chrome tabs for default preferred existing-tab discovery", async () => {
+    const claimed: unknown[] = [];
+    const browser: BrowserLike = {
+      name: "chrome",
+      user: {
+        openTabs: async () => [
+          { id: "user-tab-1", url: "https://chatgpt.com/c/abc-123", title: "SDK Review" }
+        ],
+        claimTab: async tab => {
+          claimed.push(tab);
+          return fakeChatGPTPage("user-tab-1", "https://chatgpt.com/c/abc-123", "SDK Review");
+        }
+      },
+      tabs: {
+        list: async () => []
+      }
+    };
+
+    const result = await bootstrap({ browser }, { preferExistingTab: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.context.tabId).toBe("user-tab-1");
+    expect(claimed).toEqual([
+      { id: "user-tab-1", url: "https://chatgpt.com/c/abc-123", title: "SDK Review" }
+    ]);
+  });
+
   it("claims an exact open user ChatGPT tab by conversation id without navigating", async () => {
     const claimed: unknown[] = [];
     const browser: BrowserLike = {
@@ -58,6 +85,67 @@ describe("existing Chrome tab bootstrap", () => {
 
     expect(result.ok).toBe(true);
     expect(result.context.tabId).toBe("target");
+    expect(claimed).toEqual([
+      { id: "target", url: "https://chatgpt.com/c/abc-123", title: "SDK Review" }
+    ]);
+  });
+
+  it("does not require sidebar signed-in chrome for narrow conversation tabs", async () => {
+    const browser: BrowserLike = {
+      name: "chrome",
+      user: {
+        openTabs: async () => [
+          { id: "narrow", url: "https://chatgpt.com/c/abc-123", title: "ChatGPT" }
+        ],
+        claimTab: async () => fakeNarrowChatGPTPage("narrow", "https://chatgpt.com/c/abc-123", "ChatGPT")
+      }
+    };
+
+    const result = await bootstrap({ browser }, {
+      existingTab: {
+        target: { type: "conversationId", conversationId: "abc-123" },
+        ifMissing: "block"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.context.tabId).toBe("narrow");
+    expect(result.context.conversationId).toBe("abc-123");
+    expect(result.data?.loggedIn).toBe(false);
+  });
+
+  it("does not let a stale cached page bypass an explicit existing-tab claim", async () => {
+    const claimed: unknown[] = [];
+    const stalePage = {
+      id: "stale",
+      url: () => undefined as unknown as string,
+      title: async () => "Stale tab",
+      content: async () => "",
+      locator: () => ({ count: async () => 0 })
+    } as PageLike;
+    const browser: BrowserLike = {
+      name: "chrome",
+      user: {
+        openTabs: async () => [
+          { id: "target", url: "https://chatgpt.com/c/abc-123", title: "SDK Review" }
+        ],
+        claimTab: async tab => {
+          claimed.push(tab);
+          return fakeChatGPTPage("target", "https://chatgpt.com/c/abc-123", "SDK Review");
+        }
+      }
+    };
+
+    const result = await bootstrap({ browser, page: stalePage }, {
+      existingTab: {
+        target: { type: "conversationId", conversationId: "abc-123" },
+        ifMissing: "block"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.context.tabId).toBe("target");
+    expect(result.context.conversationId).toBe("abc-123");
     expect(claimed).toEqual([
       { id: "target", url: "https://chatgpt.com/c/abc-123", title: "SDK Review" }
     ]);
@@ -127,6 +215,24 @@ function fakeChatGPTPage(id: string, url: string, title: string): PageLike {
     url: () => url,
     title: async () => title,
     content: async () => "<main>New chat Search chats Chat with ChatGPT</main>",
+    locator: () => ({ count: async () => 0 }),
+    waitForEvent: async () => ({})
+  } as PageLike;
+}
+
+function fakeNarrowChatGPTPage(id: string, url: string, title: string): PageLike {
+  return {
+    id,
+    url: () => url,
+    title: async () => title,
+    content: async () => [
+      "<main>",
+      "<a>Skip to content</a>",
+      "<div data-message-author-role=\"user\">say hi</div>",
+      "<div data-message-author-role=\"assistant\">hi</div>",
+      "<footer>ChatGPT is AI and can make mistakes. Check important info.</footer>",
+      "</main>"
+    ].join(""),
     locator: () => ({ count: async () => 0 }),
     waitForEvent: async () => ({})
   } as PageLike;

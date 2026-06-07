@@ -150,6 +150,30 @@ describe("createChatGPT", () => {
     expect(result.blocker?.message).toContain("prompts 2/1");
   });
 
+  it("plans existingTab reuse as an exact URL claim for high-level runner calls", () => {
+    const chatgpt = createChatGPT();
+    const agent = chatgpt.agent({ name: "existing-tab-agent" });
+
+    const plan = chatgpt.runner.plan(agent, {
+      input: "Continue.",
+      thread: { type: "url", url: "https://chatgpt.com/c/abc-123" },
+      existingTab: true
+    });
+
+    expect(plan.steps[0]).toEqual({
+      id: "bootstrap",
+      command: "session.bootstrap",
+      args: {
+        existingTab: {
+          target: { type: "url", url: "https://chatgpt.com/c/abc-123" },
+          ifMissing: "block",
+          ifMultiple: "block",
+          requireChatGPT: true
+        }
+      }
+    });
+  });
+
   it("returns confirmation when a generated report exceeds the byte budget", async () => {
     const dir = await mkdtemp(join(tmpdir(), "chatgpt-budget-report-"));
     const chatgpt = createChatGPT({ limits: { maxReportBytesPerRun: 1 }, reporting: { destDir: dir } });

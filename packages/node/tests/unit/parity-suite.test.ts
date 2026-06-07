@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { validateParitySuite } from "../../src/testing/parity-suite.js";
 
@@ -7,6 +10,7 @@ describe("polyglot parity coverage suite", () => {
   it("keeps fixtures, backend commands, docs, tests, and gates tied to one matrix", () => {
     const report = validateParitySuite(packageRoot);
 
+    expect(report.evidenceMode).toBe(expectedEvidenceMode());
     expect(report.surfaceCount).toBeGreaterThanOrEqual(6);
     expect(report.fixtureCount).toBeGreaterThanOrEqual(30);
     expect(report.commandCount).toBeGreaterThanOrEqual(35);
@@ -15,3 +19,9 @@ describe("polyglot parity coverage suite", () => {
     expect(report.coveredCommands).toEqual(report.sourceCommands);
   });
 });
+
+function expectedEvidenceMode(): "full-repo" | "package-local" {
+  const packageRootPath = fileURLToPath(packageRoot);
+  const repoRoot = resolve(packageRootPath, "..", "..");
+  return existsSync(join(repoRoot, "packages", "python")) ? "full-repo" : "package-local";
+}

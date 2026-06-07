@@ -41,7 +41,14 @@ type ContractManifest = {
   fixtures: Array<{ file: string; case: string; schema: string }>;
 };
 
+type RepoLayout = {
+  repoRoot: string;
+  pythonRoot?: string;
+  fullRepo: boolean;
+};
+
 export type ParitySuiteReport = {
+  evidenceMode: "full-repo" | "package-local";
   surfaceCount: number;
   fixtureCount: number;
   commandCount: number;
@@ -54,8 +61,7 @@ export type ParitySuiteReport = {
 
 export function validateParitySuite(packageRootInput: URL | string = defaultPackageRoot()): ParitySuiteReport {
   const packageRoot = toPath(packageRootInput);
-  const repoRoot = resolve(packageRoot, "..", "..");
-  const pythonRoot = resolve(packageRoot, "..", "python");
+  const repoLayout = resolveRepoLayout(packageRoot);
   const contractRoot = join(packageRoot, "contracts", "v1");
   const matrixPath = join(contractRoot, "parity-suite.json");
   const manifestPath = join(contractRoot, "manifest.json");
@@ -82,15 +88,16 @@ export function validateParitySuite(packageRootInput: URL | string = defaultPack
 
   compareSets("fixture coverage", coveredFixtures, manifestFixtures, errors);
   compareSets("backend command coverage", coveredCommands, sourceCommands, errors);
-  validateSurfaces(matrix.surfaces, surfaceIds, manifestFixtures, packageRoot, pythonRoot, repoRoot, errors);
-  validateCommands(matrix.backendCommands, surfaceIds, manifestFixtures, packageRoot, pythonRoot, repoRoot, errors);
-  validateGates(matrix.gates, packageRoot, repoRoot, errors);
+  validateSurfaces(matrix.surfaces, surfaceIds, manifestFixtures, packageRoot, repoLayout, errors);
+  validateCommands(matrix.backendCommands, surfaceIds, manifestFixtures, packageRoot, repoLayout, errors);
+  validateGates(matrix.gates, packageRoot, repoLayout, errors);
 
   if (errors.length > 0) {
     throw new Error(`Parity suite validation failed:\n- ${errors.join("\n- ")}`);
   }
 
   return {
+    evidenceMode: repoLayout.fullRepo ? "full-repo" : "package-local",
     surfaceCount: matrix.surfaces.length,
     fixtureCount: manifestFixtures.length,
     commandCount: sourceCommands.length,
@@ -107,14 +114,13 @@ function validateSurfaces(
   surfaceIds: Set<string>,
   manifestFixtures: string[],
   packageRoot: string,
-  pythonRoot: string,
-  repoRoot: string,
+  repoLayout: RepoLayout,
   errors: string[]
 ): void {
   for (const surface of surfaces) {
     const label = `surface ${surface.id}`;
     if (surface.summary.length === 0) errors.push(`${label} must include a summary.`);
-    validateEvidence(label, surface, surfaceIds, manifestFixtures, packageRoot, pythonRoot, repoRoot, errors);
+    validateEvidence(label, surface, surfaceIds, manifestFixtures, packageRoot, repoLayout, errors);
   }
 }
 
@@ -123,8 +129,7 @@ function validateCommands(
   surfaceIds: Set<string>,
   manifestFixtures: string[],
   packageRoot: string,
-  pythonRoot: string,
-  repoRoot: string,
+  repoLayout: RepoLayout,
   errors: string[]
 ): void {
   for (const [command, coverage] of Object.entries(commands)) {
@@ -132,7 +137,7 @@ function validateCommands(
     if (!surfaceIds.has(coverage.surface)) {
       errors.push(`${label} references unknown surface ${coverage.surface}.`);
     }
-    validateEvidence(label, coverage, surfaceIds, manifestFixtures, packageRoot, pythonRoot, repoRoot, errors);
+    validateEvidence(label, coverage, surfaceIds, manifestFixtures, packageRoot, repoLayout, errors);
     if ((coverage.nodeTests ?? []).length === 0) errors.push(`${label} must include nodeTests evidence.`);
     if ((coverage.pythonTests ?? []).length === 0) errors.push(`${label} must include pythonTests evidence.`);
     if ((coverage.docs ?? []).length === 0) errors.push(`${label} must include docs evidence.`);
@@ -145,8 +150,7 @@ function validateEvidence(
   _surfaceIds: Set<string>,
   manifestFixtures: string[],
   packageRoot: string,
-  pythonRoot: string,
-  repoRoot: string,
+  repoLayout: RepoLayout,
   errors: string[]
 ): void {
   for (const fixture of evidence.fixtures ?? []) {
@@ -162,29 +166,36 @@ function validateEvidence(
     assertExists(`${label} node test ${nodeTest}`, join(packageRoot, nodeTest), errors);
   }
   for (const pythonTest of evidence.pythonTests ?? []) {
-    assertExists(`${label} python test ${pythonTest}`, join(pythonRoot, pythonTest), errors);
+    if (repoLayout.pythonRoot !== undefined) {
+      assertExists(`${label} python test ${pythonTest}`, join(repoLayout.pythonRoot, pythonTest), errors);
+    }
   }
   for (const doc of evidence.docs ?? []) {
-    if (!existsAtAny([join(packageRoot, doc), join(repoRoot, doc)])) {
+    if (!existsAtAny([join(packageRoot, doc), join(repoLayout.repoRoot, doc)])) {
+      if (!repoLayout.fullRepo && doc.startsWith("../")) {
+        continue;
+      }
       errors.push(`${label} docs ${doc} does not exist.`);
     }
   }
 }
 
-function validateGates(gates: ParityGate[], packageRoot: string, repoRoot: string, errors: string[]): void {
+function validateGates(gates: ParityGate[], packageRoot: string, repoLayout: RepoLayout, errors: string[]): void {
   const ids = new Set<string>();
   const packageJson = readJson<{ scripts?: Record<string, string> }>(join(packageRoot, "package.json"));
-  const workflowText = readWorkflowText(join(repoRoot, ".github", "workflows"));
+  const workflowText = repoLayout.fullRepo ? readWorkflowText(join(repoLayout.repoRoot, ".github", "workflows")) : "";
 
   for (const gate of gates) {
     if (ids.has(gate.id)) errors.push(`gate ${gate.id} is duplicated.`);
     ids.add(gate.id);
-    assertExists(`gate ${gate.id} cwd ${gate.cwd}`, join(repoRoot, gate.cwd), errors);
+    if (repoLayout.fullRepo) {
+      assertExists(`gate ${gate.id} cwd ${gate.cwd}`, join(repoLayout.repoRoot, gate.cwd), errors);
+    }
     const script = npmRunScriptName(gate.command);
     if (script !== undefined && packageJson.scripts?.[script] === undefined) {
       errors.push(`gate ${gate.id} references missing npm script ${script}.`);
     }
-    if (gate.ciRequired !== false && !workflowText.includes(gate.command)) {
+    if (repoLayout.fullRepo && gate.ciRequired !== false && !workflowText.includes(gate.command)) {
       errors.push(`gate ${gate.id} command is missing from chatgpt-sdk-parity.yml: ${gate.command}`);
     }
   }
@@ -196,6 +207,22 @@ function readWorkflowText(workflowsDir: string): string {
     .filter(file => /\.(ya?ml)$/i.test(file))
     .map(file => readFileSync(join(workflowsDir, file), "utf8"))
     .join("\n");
+}
+
+function resolveRepoLayout(packageRoot: string): RepoLayout {
+  const repoRoot = resolve(packageRoot, "..", "..");
+  const packageFromRepoRoot = join(repoRoot, "packages", "node");
+  const pythonFromRepoRoot = join(repoRoot, "packages", "python");
+  if (existsSync(packageFromRepoRoot) && existsSync(pythonFromRepoRoot)) {
+    return { repoRoot, pythonRoot: pythonFromRepoRoot, fullRepo: true };
+  }
+
+  const siblingPythonRoot = resolve(packageRoot, "..", "python");
+  if (existsSync(siblingPythonRoot)) {
+    return { repoRoot, pythonRoot: siblingPythonRoot, fullRepo: false };
+  }
+
+  return { repoRoot, fullRepo: false };
 }
 
 function readBackendCommands(protocolPath: string): string[] {

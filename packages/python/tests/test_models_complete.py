@@ -101,6 +101,8 @@ class CompleteModelTests(unittest.TestCase):
         run_input = ChatGPTRunInput.from_wire({
             "input": "Review this.",
             "thread": {"type": "new"},
+            "existingTab": True,
+            "preferExistingTab": True,
             "attachments": [{"path": "/tmp/context.md"}],
             "response": {"format": "markdown"},
         })
@@ -112,6 +114,8 @@ class CompleteModelTests(unittest.TestCase):
         })
 
         self.assertEqual(run_input.input, "Review this.")
+        self.assertTrue(run_input.existing_tab)
+        self.assertTrue(run_input.prefer_existing_tab)
         self.assertIsNotNone(run_input.attachments)
         assert run_input.attachments is not None
         self.assertEqual(run_input.attachments[0]["path"], "/tmp/context.md")

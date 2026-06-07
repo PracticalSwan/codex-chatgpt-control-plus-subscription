@@ -1,5 +1,5 @@
 import type { RunReportOptions } from "../commands/reports.js";
-import type { ResponseFormat } from "../types.js";
+import type { BootstrapArgs, ResponseFormat } from "../types.js";
 import type {
   ChatGPTAttachmentInput,
   ChatGPTInputItem,
@@ -15,6 +15,8 @@ import type {
 const acceptedTopLevelFields = new Set([
   "input",
   "thread",
+  "existingTab",
+  "preferExistingTab",
   "attachments",
   "mode",
   "tools",
@@ -53,6 +55,8 @@ const responseFormats = new Set<ResponseFormat>([
 export type ChatGPTResponsesCreateArgs = {
   input: string | ChatGPTInputItem[];
   thread?: ChatGPTThreadSelector;
+  existingTab?: BootstrapArgs["existingTab"];
+  preferExistingTab?: boolean;
   attachments?: ChatGPTAttachmentInput[];
   mode?: ChatGPTVisibleModePreference;
   tools?: ChatGPTVisibleToolPreference[];
@@ -147,6 +151,8 @@ export function responsesCreateArgsToRunInput(args: ChatGPTResponsesCreateArgs):
     response: { format: args.text?.format ?? "markdown" }
   };
   if (args.thread !== undefined) runInput.thread = args.thread;
+  if (args.existingTab !== undefined) runInput.existingTab = args.existingTab;
+  if (args.preferExistingTab !== undefined) runInput.preferExistingTab = args.preferExistingTab;
   if (args.attachments !== undefined) runInput.attachments = args.attachments;
   if (args.mode !== undefined) runInput.mode = args.mode;
   if (args.tools !== undefined) runInput.tools = args.tools;

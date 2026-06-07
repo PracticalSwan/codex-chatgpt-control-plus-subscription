@@ -19,11 +19,12 @@ const descriptors: CommandDescriptor[] = [
   workflow("ask", "Ask ChatGPT in a new or selected thread, optionally with files, wait/read, downloads, and reports.", [
     `await chatgpt.ask({ prompt: "reply with the word hi", wait: true, read: true });`
   ]),
-  workflow("askInThread", "Open an existing thread by URL, conversation id, title, or search query, then ask and read.", [
-    `await chatgpt.askInThread({ thread: { type: "search", query: "Naming macOS Utility" }, prompt: "Continue." });`
+  workflow("askInThread", "Open or claim an existing thread by URL, conversation id, title, or search query, then ask and read.", [
+    `await chatgpt.askInThread({ thread: { type: "search", query: "Naming macOS Utility" }, prompt: "Continue." });`,
+    `await chatgpt.askInThread({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, prompt: "Continue." });`
   ]),
-  workflow("askWithFiles", "Attach absolute local file paths, ask, wait, and read.", [
-    `await chatgpt.askWithFiles({ files: ["/absolute/path/brief.md"], prompt: "Summarize this.", wait: true });`
+  workflow("askWithFiles", "Attach absolute local file paths, optionally set mode, ask, wait, and read.", [
+    `await chatgpt.askWithFiles({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, mode: { effort: "Thinking" }, files: ["/absolute/path/brief.md"], prompt: "Summarize this.", wait: true, read: { format: "markdown" } });`
   ]),
   workflow("askAndDownload", "Ask ChatGPT to produce a visible downloadable output and save the latest exposed file.", [
     `await chatgpt.askAndDownload({ prompt: "Create a CSV.", download: { destDir: "/tmp/out" }, wait: true });`
@@ -31,8 +32,9 @@ const descriptors: CommandDescriptor[] = [
   workflow("runMessages", "Run sequential prompts where later prompts can use earlier step data.", [
     `await chatgpt.runMessages({ messages: [{ id: "first", prompt: "alpha" }, { id: "second", prompt: "beta" }] });`
   ]),
-  workflow("runner.run", "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, mode, and response options.", [
-    `const agent = chatgpt.agent({ name: "reviewer", instructions: "Review deeply." }); await chatgpt.runner.run(agent, { input: "Review this.", thread: { type: "new" } });`
+  workflow("runner.run", "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, existing-tab, mode, and response options.", [
+    `const agent = chatgpt.agent({ name: "reviewer", instructions: "Review deeply." }); await chatgpt.runner.run(agent, { input: "Review this.", thread: { type: "new" } });`,
+    `await chatgpt.runner.run(agent, { input: "Continue.", thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true });`
   ]),
   workflow("responses.create", "Narrow Responses-shaped adapter over the visible ChatGPT browser-control runner; rejects unsupported API-only fields before prompt submission.", [
     `await chatgpt.responses.create({ input: "Summarize.", thread: { type: "current" }, text: { format: "markdown" }, stream: false });`
@@ -184,7 +186,7 @@ function primitive(name: string, summary: string, defaultTimeoutMs: number): Com
     defaults: {},
     retryPolicy: "Return structured CommandResult failures; retry only when the blocker is recoverable and no duplicate prompt will be submitted.",
     blockers: primitiveBlockers(name),
-    examples: []
+    examples: primitiveExamples(name)
   };
 }
 
@@ -195,7 +197,24 @@ function workflowArgs(name: string): Record<string, string> {
   if (name === "ask-and-download") return { prompt: "message to send", destDir: "download destination directory" };
   if (name === "two-turn") return { first: "first message", second: "second message" };
   if (name === "new-ask-read") return { prompt: "message to send" };
-  return { prompt: "message to send or workflow-specific input", thread: "optional thread selector", report: "optional redacted report settings" };
+  if (name === "askWithFiles") {
+    return {
+      files: "absolute local file paths to attach before submitting",
+      prompt: "message to send after files are attached",
+      thread: "optional thread selector",
+      existingTab: "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
+      mode: "optional visible mode selection, e.g. { effort: \"Thinking\" }",
+      wait: "true or wait options; defaults to true",
+      read: "true or read options such as { format: \"markdown\" }; defaults to Markdown",
+      report: "optional redacted report settings"
+    };
+  }
+  return {
+    prompt: "message to send or workflow-specific input",
+    thread: "optional thread selector",
+    existingTab: "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
+    report: "optional redacted report settings"
+  };
 }
 
 function workflowDefaults(name: string): Record<string, unknown> {
@@ -219,7 +238,27 @@ function primitiveArgs(name: string): Record<string, string> {
   if (name === "response.copy") return { prefer: "clipboard or dom", format: "markdown, normalized_text, visible_text, html, blocks, or all" };
   if (name.startsWith("threads.search")) return { query: "history search query" };
   if (name.startsWith("files.attach")) return { paths: "absolute local file paths" };
+  if (name === "modes.set") {
+    return {
+      effort: "visible effort label such as Thinking or Extended",
+      model: "visible model label such as Instant, Pro, or another available model",
+      timeoutMs: "optional timeout for opening and selecting the visible mode menu"
+    };
+  }
   return {};
+}
+
+function primitiveExamples(name: string): string[] {
+  if (name === "modes.set") {
+    return [
+      `await chatgpt.modes.set({ effort: "Thinking" });`,
+      `await chatgpt.askWithFiles({ mode: { effort: "Thinking" }, files: ["/absolute/path.jpg"], prompt: "Describe this image.", wait: true });`
+    ];
+  }
+  if (name === "files.attach") {
+    return [`await chatgpt.files.attach({ paths: ["/absolute/path.jpg"] });`];
+  }
+  return [];
 }
 
 function primitiveBlockers(name: string): string[] {

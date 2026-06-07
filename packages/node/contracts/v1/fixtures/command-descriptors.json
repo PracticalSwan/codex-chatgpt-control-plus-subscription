@@ -4,6 +4,7 @@
   "result": [
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -33,6 +34,7 @@
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -52,19 +54,25 @@
       },
       "defaultTimeoutMs": 120000,
       "examples": [
-        "await chatgpt.askInThread({ thread: { type: \"search\", query: \"Naming macOS Utility\" }, prompt: \"Continue.\" });"
+        "await chatgpt.askInThread({ thread: { type: \"search\", query: \"Naming macOS Utility\" }, prompt: \"Continue.\" });",
+        "await chatgpt.askInThread({ thread: { type: \"url\", url: \"https://chatgpt.com/c/<conversation-id>\" }, existingTab: true, prompt: \"Continue.\" });"
       ],
       "layer": "workflow",
       "name": "askInThread",
       "retryPolicy": "Return structured CommandResult failures; do not resubmit prompts unless the sequence policy permits unmatched-turn recovery.",
       "risk": "medium",
-      "summary": "Open an existing thread by URL, conversation id, title, or search query, then ask and read."
+      "summary": "Open or claim an existing thread by URL, conversation id, title, or search query, then ask and read."
     },
     {
       "args": {
-        "prompt": "message to send or workflow-specific input",
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
+        "files": "absolute local file paths to attach before submitting",
+        "mode": "optional visible mode selection, e.g. { effort: \"Thinking\" }",
+        "prompt": "message to send after files are attached",
+        "read": "true or read options such as { format: \"markdown\" }; defaults to Markdown",
         "report": "optional redacted report settings",
-        "thread": "optional thread selector"
+        "thread": "optional thread selector",
+        "wait": "true or wait options; defaults to true"
       },
       "blockers": [
         "browser_bridge_unavailable",
@@ -81,16 +89,17 @@
       },
       "defaultTimeoutMs": 120000,
       "examples": [
-        "await chatgpt.askWithFiles({ files: [\"/absolute/path/brief.md\"], prompt: \"Summarize this.\", wait: true });"
+        "await chatgpt.askWithFiles({ thread: { type: \"url\", url: \"https://chatgpt.com/c/<conversation-id>\" }, existingTab: true, mode: { effort: \"Thinking\" }, files: [\"/absolute/path/brief.md\"], prompt: \"Summarize this.\", wait: true, read: { format: \"markdown\" } });"
       ],
       "layer": "workflow",
       "name": "askWithFiles",
       "retryPolicy": "Return structured CommandResult failures; do not resubmit prompts unless the sequence policy permits unmatched-turn recovery.",
       "risk": "medium",
-      "summary": "Attach absolute local file paths, ask, wait, and read."
+      "summary": "Attach absolute local file paths, optionally set mode, ask, wait, and read."
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -120,6 +129,7 @@
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -149,6 +159,7 @@
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -168,16 +179,18 @@
       },
       "defaultTimeoutMs": 120000,
       "examples": [
-        "const agent = chatgpt.agent({ name: \"reviewer\", instructions: \"Review deeply.\" }); await chatgpt.runner.run(agent, { input: \"Review this.\", thread: { type: \"new\" } });"
+        "const agent = chatgpt.agent({ name: \"reviewer\", instructions: \"Review deeply.\" }); await chatgpt.runner.run(agent, { input: \"Review this.\", thread: { type: \"new\" } });",
+        "await chatgpt.runner.run(agent, { input: \"Continue.\", thread: { type: \"url\", url: \"https://chatgpt.com/c/<conversation-id>\" }, existingTab: true });"
       ],
       "layer": "workflow",
       "name": "runner.run",
       "retryPolicy": "Return structured CommandResult failures; do not resubmit prompts unless the sequence policy permits unmatched-turn recovery.",
       "risk": "medium",
-      "summary": "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, mode, and response options."
+      "summary": "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, existing-tab, mode, and response options."
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -207,6 +220,7 @@
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -234,6 +248,7 @@
     },
     {
       "args": {
+        "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
         "prompt": "message to send or workflow-specific input",
         "report": "optional redacted report settings",
         "thread": "optional thread selector"
@@ -698,7 +713,9 @@
       ],
       "defaults": {},
       "defaultTimeoutMs": 180000,
-      "examples": [],
+      "examples": [
+        "await chatgpt.files.attach({ paths: [\"/absolute/path.jpg\"] });"
+      ],
       "layer": "primitive",
       "name": "files.attach",
       "retryPolicy": "Return structured CommandResult failures; retry only when the blocker is recoverable and no duplicate prompt will be submitted.",
@@ -743,7 +760,11 @@
       "summary": "Click Copy response and return clipboard Markdown, with DOM fallback."
     },
     {
-      "args": {},
+      "args": {
+        "effort": "visible effort label such as Thinking or Extended",
+        "model": "visible model label such as Instant, Pro, or another available model",
+        "timeoutMs": "optional timeout for opening and selecting the visible mode menu"
+      },
       "blockers": [
         "browser_bridge_unavailable",
         "login_required",
@@ -751,7 +772,10 @@
       ],
       "defaults": {},
       "defaultTimeoutMs": 30000,
-      "examples": [],
+      "examples": [
+        "await chatgpt.modes.set({ effort: \"Thinking\" });",
+        "await chatgpt.askWithFiles({ mode: { effort: \"Thinking\" }, files: [\"/absolute/path.jpg\"], prompt: \"Describe this image.\", wait: true });"
+      ],
       "layer": "primitive",
       "name": "modes.set",
       "retryPolicy": "Return structured CommandResult failures; retry only when the blocker is recoverable and no duplicate prompt will be submitted.",

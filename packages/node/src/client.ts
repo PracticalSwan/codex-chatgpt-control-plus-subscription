@@ -5,6 +5,7 @@ import type {
   CommandResult,
   CopyResponseArgs,
   DownloadLatestArgs,
+  ExistingTabPolicy,
   NewThreadArgs,
   OpenThreadArgs,
   ReadLatestArgs,
@@ -54,6 +55,8 @@ export type ChatGPTClientOptions = RuntimeEnv & {
     mode?: SetModeArgs;
     wait?: boolean | WaitArgs;
     read?: boolean | ReadLatestArgs;
+    existingTab?: BootstrapArgs["existingTab"];
+    preferExistingTab?: boolean;
   };
   limits?: Partial<RunLimits>;
   reporting?: RunReportOptions;
@@ -83,6 +86,8 @@ export type FileInput = string | { path: string };
 export type AskWorkflowArgs = {
   prompt: string;
   thread?: WorkflowThread;
+  existingTab?: BootstrapArgs["existingTab"];
+  preferExistingTab?: boolean;
   mode?: SetModeArgs;
   tools?: SelectToolArgs[];
   files?: FileInput[];
@@ -107,6 +112,8 @@ export type AskAndDownloadWorkflowArgs = AskWorkflowArgs & {
 
 export type RunMessagesArgs = {
   thread?: WorkflowThread;
+  existingTab?: BootstrapArgs["existingTab"];
+  preferExistingTab?: boolean;
   mode?: SetModeArgs;
   messages: Array<{
     id?: string;
@@ -428,6 +435,8 @@ function planAgentWorkflow<TOutput>(
 type NormalizedRunnerInput = {
   prompt: string;
   thread?: WorkflowThread;
+  existingTab?: BootstrapArgs["existingTab"];
+  preferExistingTab?: boolean;
   mode?: SetModeArgs;
   tools: SelectToolArgs[];
   files: string[];
@@ -445,9 +454,14 @@ function planAgentWorkflowFromNormalized<TOutput>(
 ): SequencePlan {
   const wait = input.wait ?? agent.defaults.wait ?? defaults.wait ?? true;
   const read = input.read ?? agent.defaults.read ?? defaults.read ?? { format: "markdown" };
+  const thread = input.thread ?? agent.defaults.thread ?? { type: "new" };
   const steps: SequencePlan["steps"] = [
-    { id: "bootstrap", command: "session.bootstrap" },
-    ...threadSteps(input.thread ?? agent.defaults.thread ?? { type: "new" })
+    bootstrapStepForWorkflow(
+      thread,
+      input.existingTab ?? agent.defaults.existingTab ?? defaults.existingTab,
+      input.preferExistingTab ?? agent.defaults.preferExistingTab ?? defaults.preferExistingTab
+    ),
+    ...threadSteps(thread)
   ];
 
   const mode = input.mode ?? agent.defaults.mode ?? defaults.mode;
@@ -509,6 +523,8 @@ function normalizeRunnerInput<TOutput>(agent: ChatGPTAgent<TOutput>, input: Chat
   };
 
   if (args.thread !== undefined) normalized.thread = args.thread;
+  if (args.existingTab !== undefined) normalized.existingTab = args.existingTab;
+  if (args.preferExistingTab !== undefined) normalized.preferExistingTab = args.preferExistingTab;
   if (mode !== undefined) normalized.mode = mode;
   if (args.response !== undefined) normalized.read = args.response;
   if (args.download !== undefined) normalized.download = args.download;
@@ -638,9 +654,14 @@ function runtimeEnv(options: ChatGPTClientOptions): RuntimeEnv {
 }
 
 function planAskWorkflow(args: AskWorkflowArgs, defaults: ChatGPTClientOptions["defaults"] = {}): SequencePlan {
+  const thread = args.thread ?? { type: "new" };
   const steps: SequencePlan["steps"] = [
-    { id: "bootstrap", command: "session.bootstrap" },
-    ...threadSteps(args.thread ?? { type: "new" })
+    bootstrapStepForWorkflow(
+      thread,
+      args.existingTab ?? defaults.existingTab,
+      args.preferExistingTab ?? defaults.preferExistingTab
+    ),
+    ...threadSteps(thread)
   ];
 
   const mode = args.mode ?? defaults.mode;
@@ -678,9 +699,14 @@ function planAskWorkflow(args: AskWorkflowArgs, defaults: ChatGPTClientOptions["
 }
 
 function planRunMessages(args: RunMessagesArgs, defaults: ChatGPTClientOptions["defaults"] = {}): SequencePlan {
+  const thread = args.thread ?? { type: "new" };
   const steps: SequencePlan["steps"] = [
-    { id: "bootstrap", command: "session.bootstrap" },
-    ...threadSteps(args.thread ?? { type: "new" })
+    bootstrapStepForWorkflow(
+      thread,
+      args.existingTab ?? defaults.existingTab,
+      args.preferExistingTab ?? defaults.preferExistingTab
+    ),
+    ...threadSteps(thread)
   ];
 
   const mode = args.mode ?? defaults.mode;
@@ -787,6 +813,75 @@ function isCommandResult(value: unknown): value is CommandResult<unknown> {
     && Array.isArray(value.warnings)
     && isRecord(value.context)
     && typeof value.context.timestamp === "string";
+}
+
+function bootstrapStepForWorkflow(
+  thread: WorkflowThread,
+  existingTab: BootstrapArgs["existingTab"] | undefined,
+  preferExistingTab: boolean | undefined
+): SequencePlan["steps"][number] {
+  const args = bootstrapArgsForWorkflow(thread, existingTab, preferExistingTab);
+  if (args === undefined) {
+    return { id: "bootstrap", command: "session.bootstrap" };
+  }
+  return { id: "bootstrap", command: "session.bootstrap", args };
+}
+
+function bootstrapArgsForWorkflow(
+  thread: WorkflowThread,
+  existingTab: BootstrapArgs["existingTab"] | undefined,
+  preferExistingTab: boolean | undefined
+): BootstrapArgs | undefined {
+  const args: BootstrapArgs = {};
+  if (existingTab !== undefined) {
+    args.existingTab = existingTab === true ? existingTabPolicyFromThread(thread) : existingTab;
+  }
+  if (preferExistingTab !== undefined) {
+    args.preferExistingTab = preferExistingTab;
+  }
+  return Object.keys(args).length === 0 ? undefined : args;
+}
+
+function existingTabPolicyFromThread(thread: WorkflowThread): ExistingTabPolicy {
+  const target = existingTabTargetFromThread(thread);
+  if (target === undefined) {
+    return {
+      target: { type: "selected", host: "chatgpt" },
+      ifMissing: "block",
+      ifMultiple: "first",
+      requireChatGPT: true
+    };
+  }
+  return {
+    target,
+    ifMissing: "block",
+    ifMultiple: target.type === "selected" ? "first" : "block",
+    requireChatGPT: true
+  };
+}
+
+function existingTabTargetFromThread(thread: WorkflowThread): ExistingTabPolicy["target"] | undefined {
+  if (isTypedThread(thread)) {
+    switch (thread.type) {
+      case "new":
+      case "search":
+        return undefined;
+      case "current":
+        return { type: "selected", host: "chatgpt" };
+      case "url":
+        return { type: "url", url: thread.url };
+      case "conversationId":
+      case "conversation_id":
+        return { type: "conversationId", conversationId: thread.conversationId };
+      case "title":
+        return { type: "title", title: thread.title, exact: false };
+    }
+  }
+
+  if (thread.url !== undefined) return { type: "url", url: thread.url };
+  if (thread.conversationId !== undefined) return { type: "conversationId", conversationId: thread.conversationId };
+  if (thread.title !== undefined) return { type: "title", title: thread.title, exact: false };
+  return undefined;
 }
 
 function threadSteps(thread: WorkflowThread): SequencePlan["steps"] {

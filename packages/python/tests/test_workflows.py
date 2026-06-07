@@ -27,6 +27,19 @@ class WorkflowFacadeTests(unittest.TestCase):
         calls = [
             (lambda: chatgpt.ask(prompt="hi"), "ask", {"prompt": "hi"}),
             (lambda: chatgpt.ask_in_thread(thread={"type": "current"}, prompt="hi"), "askInThread", {"thread": {"type": "current"}, "prompt": "hi"}),
+            (
+                lambda: chatgpt.ask_in_thread(
+                    thread={"type": "url", "url": "https://chatgpt.com/c/abc-123"},
+                    prompt="hi",
+                    existing_tab=True,
+                ),
+                "askInThread",
+                {
+                    "thread": {"type": "url", "url": "https://chatgpt.com/c/abc-123"},
+                    "prompt": "hi",
+                    "existingTab": True,
+                },
+            ),
             (lambda: chatgpt.ask_with_files(prompt="hi", files=["/tmp/a.txt"]), "askWithFiles", {"prompt": "hi", "files": ["/tmp/a.txt"]}),
             (lambda: chatgpt.ask_and_download(prompt="hi", download={"destDir": "/tmp"}), "askAndDownload", {"prompt": "hi", "download": {"destDir": "/tmp"}}),
             (lambda: chatgpt.run_messages(messages=[{"prompt": "one"}]), "runMessages", {"messages": [{"prompt": "one"}]}),

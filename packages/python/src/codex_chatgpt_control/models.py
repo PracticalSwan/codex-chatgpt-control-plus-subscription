@@ -158,6 +158,8 @@ class ChatGPTAgentModel(WireModel):
 class ChatGPTRunInput(WireModel):
     input: Any
     thread: dict[str, Any] | None = None
+    existing_tab: dict[str, Any] | bool | None = Field(default=None, alias="existingTab")
+    prefer_existing_tab: bool | None = Field(default=None, alias="preferExistingTab")
     attachments: list[dict[str, Any]] | None = None
     mode: dict[str, Any] | None = None
     tools: list[dict[str, Any]] | None = None

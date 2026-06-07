@@ -35,6 +35,8 @@ describe("extractMessagesFromHtml", () => {
   it("detects transient assistant status text", () => {
     expect(isTransientAssistantText("Thinking")).toBe(true);
     expect(isTransientAssistantText("Thinking...")).toBe(true);
+    expect(isTransientAssistantText("Analyzing image")).toBe(true);
+    expect(isTransientAssistantText("Analyzing images...")).toBe(true);
     expect(isTransientAssistantText("hi")).toBe(false);
   });
 
@@ -199,6 +201,38 @@ describe("extractMessagesFromHtml", () => {
     expect(result.output_text).toBe("assistant answer after baseline");
     expect(result.data?.responseText).toBe("assistant answer after baseline");
     expect(result.data?.assistantTurnCount).toBe(2);
+  });
+
+  it("does not treat image-analysis status text as a completed assistant answer", async () => {
+    const page = scriptedWaitPage([
+      {
+        totalCount: 4,
+        assistantCount: 2,
+        latestAssistantTurnIndex: 4,
+        latestAssistantText: "Analyzing image",
+        hasStopControl: false,
+        hasResponseActions: true
+      },
+      {
+        totalCount: 4,
+        assistantCount: 2,
+        latestAssistantTurnIndex: 4,
+        latestAssistantText: "Napoleon is adorable.",
+        hasStopControl: false,
+        hasResponseActions: true
+      }
+    ]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 1,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.output_text).toBe("Napoleon is adorable.");
+    expect(result.data?.responseText).toBe("Napoleon is adorable.");
   });
 
   it("falls back to a guarded read when wait misses a submitted assistant turn", async () => {

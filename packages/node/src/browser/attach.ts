@@ -1,4 +1,4 @@
-import { BrowserBridgeUnavailableError, ChatGPTControlError, LoginRequiredError, SelectorDriftError } from "../errors.js";
+import { BrowserBridgeUnavailableError, ChatGPTControlError, LoginRequiredError } from "../errors.js";
 import type { BootstrapArgs, BrowserLike, BrowserUserTabInfo, ExistingTabPolicy, ExistingTabTarget, PageLike, RuntimeEnv } from "../types.js";
 import { parseConversationId, readPageState } from "./page-state.js";
 
@@ -22,10 +22,6 @@ export async function attachChatGPTBrowser(
 
   if (state.blocker?.kind === "login_required") {
     throw new LoginRequiredError(state.blocker.visibleText);
-  }
-
-  if (state.url.includes("chatgpt.com") && !state.signedIn && state.visibleText.length > 0) {
-    throw new SelectorDriftError("ChatGPT loaded, but no signed-in ChatGPT controls were recognized.", state.visibleText);
   }
 
   const attached: AttachedBrowser = {
@@ -128,12 +124,16 @@ async function getOrCreateChatGPTPage(
   env: RuntimeEnv,
   args: BootstrapArgs
 ): Promise<PageLike> {
-  if (env.page !== undefined) {
-    return normalizePage(env.page);
-  }
-
   const targetUrl = args.url ?? CHATGPT_HOME;
   const explicitExistingPolicy = normalizeExplicitExistingTabPolicy(args);
+
+  if (env.page !== undefined) {
+    const cached = normalizePage(env.page);
+    if (await cachedPageMatchesBootstrapArgs(cached, args, explicitExistingPolicy)) {
+      return cached;
+    }
+  }
+
   if (explicitExistingPolicy !== undefined) {
     const existing = await selectExistingTab(browser, explicitExistingPolicy);
     if (existing !== undefined) {
@@ -170,6 +170,23 @@ async function getOrCreateChatGPTPage(
   }
 
   throw new BrowserBridgeUnavailableError("Codex can access a browser object, but no tab creation API was found.");
+}
+
+async function cachedPageMatchesBootstrapArgs(
+  page: PageLike,
+  args: BootstrapArgs,
+  explicitExistingPolicy: ExistingTabPolicy | undefined
+): Promise<boolean> {
+  if (explicitExistingPolicy !== undefined) {
+    return pageMatchesExistingTarget(page, explicitExistingPolicy);
+  }
+
+  if (args.url !== undefined) {
+    const currentUrl = await Promise.resolve(page.url?.()).catch(() => undefined);
+    return urlMatches(currentUrl, args.url);
+  }
+
+  return true;
 }
 
 function normalizeExplicitExistingTabPolicy(args: BootstrapArgs): ExistingTabPolicy | undefined {
@@ -282,6 +299,15 @@ async function pageMatchesExistingTarget(page: PageLike, policy: ExistingTabPoli
 }
 
 async function findExistingChatGPTTab(browser: BrowserLike): Promise<PageLike | undefined> {
+  const userTab = await selectExistingUserTab(browser, {
+    target: { type: "selected", host: "chatgpt" },
+    ifMultiple: "first",
+    requireChatGPT: true
+  });
+  if (userTab !== undefined) {
+    return userTab;
+  }
+
   const selected = browser.tabs?.selected;
   if (typeof selected === "function") {
     try {

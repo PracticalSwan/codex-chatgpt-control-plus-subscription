@@ -1,5 +1,6 @@
 {
   "args": {
+    "existingTab": "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
     "prompt": "message to send or workflow-specific input",
     "report": "optional redacted report settings",
     "thread": "optional thread selector"
@@ -19,11 +20,12 @@
   },
   "defaultTimeoutMs": 120000,
   "examples": [
-    "const agent = chatgpt.agent({ name: \"reviewer\", instructions: \"Review deeply.\" }); await chatgpt.runner.run(agent, { input: \"Review this.\", thread: { type: \"new\" } });"
+    "const agent = chatgpt.agent({ name: \"reviewer\", instructions: \"Review deeply.\" }); await chatgpt.runner.run(agent, { input: \"Review this.\", thread: { type: \"new\" } });",
+    "await chatgpt.runner.run(agent, { input: \"Continue.\", thread: { type: \"url\", url: \"https://chatgpt.com/c/<conversation-id>\" }, existingTab: true });"
   ],
   "layer": "workflow",
   "name": "runner.run",
   "retryPolicy": "Return structured CommandResult failures; do not resubmit prompts unless the sequence policy permits unmatched-turn recovery.",
   "risk": "medium",
-  "summary": "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, mode, and response options."
+  "summary": "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, existing-tab, mode, and response options."
 }

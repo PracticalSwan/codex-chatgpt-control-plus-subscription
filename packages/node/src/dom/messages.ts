@@ -161,14 +161,17 @@ export async function readLatestMessageTextSnapshot(
 
 export function isTransientAssistantText(text: string): boolean {
   const normalized = normalizeWhitespace(text)
-    .replace(/[.。]+$/g, "")
+    .replace(/[.。…]+$/g, "")
     .trim()
     .toLowerCase();
 
   return normalized === "thinking"
     || normalized === "reasoning"
     || normalized === "searching"
-    || normalized === "searching the web";
+    || normalized === "searching the web"
+    || /^analyzing (?:the )?images?$/.test(normalized)
+    || /^processing (?:the )?images?$/.test(normalized)
+    || /^reading (?:the )?images?$/.test(normalized);
 }
 
 export function countMessages(messages: ExtractedMessage[], role?: MessageRole): number {

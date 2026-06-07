@@ -4,6 +4,7 @@ import type {
   CommandStatus,
   CopyResponseArgs,
   DownloadLatestArgs,
+  BootstrapArgs,
   ReadLatestArgs,
   ResponseCaptureFidelity,
   ResponseCaptureSource,
@@ -46,6 +47,8 @@ export type ChatGPTVisibleToolPreference = SelectToolArgs & {
 
 export type ChatGPTRunDefaults = {
   thread?: ChatGPTThreadSelector | ThreadTarget;
+  existingTab?: BootstrapArgs["existingTab"];
+  preferExistingTab?: boolean;
   mode?: ChatGPTVisibleModePreference;
   wait?: boolean | WaitArgs;
   read?: boolean | ReadLatestArgs;
@@ -102,6 +105,8 @@ export type ChatGPTRunInput =
   | {
       input: string | ChatGPTInputItem[];
       thread?: ChatGPTThreadSelector;
+      existingTab?: BootstrapArgs["existingTab"];
+      preferExistingTab?: boolean;
       attachments?: ChatGPTAttachmentInput[];
       mode?: ChatGPTVisibleModePreference;
       tools?: ChatGPTVisibleToolPreference[];
