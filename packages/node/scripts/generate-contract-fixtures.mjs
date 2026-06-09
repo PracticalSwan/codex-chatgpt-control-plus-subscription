@@ -25,6 +25,24 @@ const generatedFixtures = [];
 const chatgpt = createChatGPT({ now: () => FIXED_DATE });
 rmSync(reportFixtureDir, { recursive: true, force: true });
 
+const BLOCKER_EXPLANATION_PROFILES = [
+  { kind: "browser_bridge_unavailable", title: "Browser bridge unavailable", category: "environment", severity: "blocked", userActionRequired: false },
+  { kind: "login_required", title: "Login required", category: "auth", severity: "action_required", userActionRequired: true },
+  { kind: "captcha", title: "Captcha or human verification required", category: "auth", severity: "action_required", userActionRequired: true },
+  { kind: "rate_limit", title: "Rate limited", category: "auth", severity: "action_required", userActionRequired: true },
+  { kind: "modal", title: "Modal is blocking the page", category: "runtime", severity: "action_required", userActionRequired: true },
+  { kind: "permission", title: "Permission required", category: "permission", severity: "action_required", userActionRequired: true },
+  { kind: "confirmation", title: "Confirmation required", category: "user_confirmation", severity: "action_required", userActionRequired: true },
+  { kind: "selector_drift", title: "Selector drift", category: "ui_drift", severity: "blocked", userActionRequired: false },
+  { kind: "artifact_unavailable", title: "Artifact unavailable", category: "artifact", severity: "warning", userActionRequired: false },
+  { kind: "artifact_selector_drift", title: "Artifact selector drift", category: "ui_drift", severity: "blocked", userActionRequired: false },
+  { kind: "artifact_download_unavailable", title: "Artifact download unavailable", category: "download", severity: "warning", userActionRequired: false },
+  { kind: "download_unavailable", title: "Download unavailable", category: "download", severity: "warning", userActionRequired: false },
+  { kind: "upload_failed", title: "Upload failed", category: "upload", severity: "action_required", userActionRequired: true },
+  { kind: "not_found", title: "Target not found", category: "not_found", severity: "warning", userActionRequired: false },
+  { kind: "unknown", title: "Unknown blocker", category: "unknown", severity: "blocked", userActionRequired: false }
+];
+
 await writeGeneratedFixture(
   "backend-runner-plan-request.json",
   "backendRequest",
@@ -235,6 +253,19 @@ await writeGeneratedFixture(
 );
 
 await writeGeneratedFixture("command-descriptors.json", "backendResponse", "command_descriptors", await backendResponse("commands"));
+await writeGeneratedFixture(
+  "blocker-explanation-profiles.json",
+  "backendResponse",
+  "blocker_explanation_profiles",
+  {
+    schemaVersion: "chatgpt.browser_control.backend_response.v1",
+    requestId: "req_blocker_explanation_profiles",
+    ok: true,
+    result: {
+      profiles: BLOCKER_EXPLANATION_PROFILES
+    }
+  }
+);
 await writeGeneratedFixture("describe-runner-run.json", "commandDescriptor", "describe_runner_run", await backendResult("describe", { name: "runner.run" }));
 await writeGeneratedFixture("help-root.json", "backendResponse", "help_root", await backendResponse("help"));
 
@@ -265,6 +296,26 @@ await writeGeneratedFixture(
   "commandResult",
   "primitive_bootstrap_blocker",
   commandResultFixture(await backendResult("session.bootstrap"))
+);
+
+await writeGeneratedFixture(
+  "existing-tab-diagnostics-blocker.json",
+  "commandResult",
+  "existing_tab_diagnostics_blocker",
+  commandResultFixture(await backendResult(
+    "session.bootstrap",
+    {
+      existingTab: {
+        target: { type: "conversationId", conversationId: "abc-123" },
+        ifMissing: "block"
+      }
+    },
+    {
+      browser: fakeExistingTabsBrowser([
+        { id: "other", url: "https://chatgpt.com/c/other", title: "Other Chat" }
+      ])
+    }
+  ))
 );
 
 await writeGeneratedFixture(
@@ -466,6 +517,18 @@ function fakeBrowser({ assistantText }) {
     name: "chrome",
     tabs: {
       selected: () => page
+    }
+  };
+}
+
+function fakeExistingTabsBrowser(tabs) {
+  return {
+    name: "chrome",
+    user: {
+      openTabs: async () => tabs,
+      claimTab: async () => {
+        throw new Error("claimTab should not be called while generating a missing existing-tab fixture.");
+      }
     }
   };
 }

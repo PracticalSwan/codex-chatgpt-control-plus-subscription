@@ -6,6 +6,8 @@ The backend process does not have access to a browser bridge. This is expected w
 
 The structured blocker should include `code: "codex_chrome_bridge_unavailable"` plus `blocker.remediation[]`. Agents should read those remediation steps before asking the user to restart Chrome or change permissions.
 
+Use `chatgpt.explainBlocker(result)` or Python `explain_blocker(result)` when rendering a blocker in logs or CLI output. The explanation keeps the structured blocker intact and adds category, severity, conservative retry/resume guidance, next-command hints, and Markdown.
+
 Do not conclude that Chrome or the extension is broken from a plain shell result, or from checking `globalThis.agent` before the Chrome plugin runtime is initialized. For a true Codex Chrome-plugin live run, bootstrap the runtime first:
 
 ```js
@@ -44,6 +46,10 @@ Return the visible limit text and stop unless the user asks to wait or try a dif
 The ChatGPT UI changed or the page loaded an unexpected surface. Return visible menu/button candidates and a screenshot/DOM summary if available.
 
 Runner results surface this as `interruptions[0].type === "selector_drift"` with `blocker.candidates` when visible candidates were available. Do not retry automatically; ask the user or update selectors.
+
+## Existing Tab Not Found Or Ambiguous
+
+When `existingTab` targeting cannot select one already-open tab, inspect `blocker.diagnostics.existingTab` or the rendered blocker explanation. Diagnostics are metadata-only: requested target, whether user-open tabs were available, candidate tab IDs, URLs, titles, conversation IDs, omitted candidate count, and mismatch reason. They must not include page text or chat content.
 
 ## File Upload Permission
 

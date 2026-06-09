@@ -1,9 +1,16 @@
 import { BrowserBridgeUnavailableError, ChatGPTControlError, LoginRequiredError } from "../errors.js";
-import type { BootstrapArgs, BrowserLike, BrowserUserTabInfo, ExistingTabPolicy, ExistingTabTarget, PageLike, RuntimeEnv } from "../types.js";
+import type { BootstrapArgs, BrowserLike, BrowserUserTabInfo, ExistingTabDiagnostics, ExistingTabPolicy, ExistingTabTarget, PageLike, RuntimeEnv } from "../types.js";
 import { parseConversationId, readPageState } from "./page-state.js";
 
 const CHATGPT_HOME = "https://chatgpt.com/";
 const CHATGPT_HOSTS = new Set(["chatgpt.com", "www.chatgpt.com", "chat.openai.com"]);
+const MAX_EXISTING_TAB_DIAGNOSTIC_CANDIDATES = 10;
+const MAX_EXISTING_TAB_DIAGNOSTIC_FIELD_LENGTH = 240;
+
+type ExistingTabSelectionOutcome = {
+  page?: PageLike;
+  diagnostics?: ExistingTabDiagnostics;
+};
 
 export type AttachedBrowser = {
   browser: BrowserLike;
@@ -136,15 +143,17 @@ async function getOrCreateChatGPTPage(
 
   if (explicitExistingPolicy !== undefined) {
     const existing = await selectExistingTab(browser, explicitExistingPolicy);
-    if (existing !== undefined) {
-      return existing;
+    if (existing.page !== undefined) {
+      return existing.page;
     }
 
     const ifMissing = explicitExistingPolicy.ifMissing ?? "block";
     if (ifMissing === "block") {
       throw new ExistingTabSelectionError(
         "No already-open ChatGPT tab matched the requested existing-tab target.",
-        "existing_tab_not_found"
+        "existing_tab_not_found",
+        existing.diagnostics?.candidateTabs,
+        existing.diagnostics
       );
     }
     const missingUrl = ifMissing === "open"
@@ -212,9 +221,9 @@ function normalizeExplicitExistingTabPolicy(args: BootstrapArgs): ExistingTabPol
   };
 }
 
-async function selectExistingTab(browser: BrowserLike, policy: ExistingTabPolicy): Promise<PageLike | undefined> {
-  const userMatch = await selectExistingUserTab(browser, policy);
-  if (userMatch !== undefined) {
+async function selectExistingTab(browser: BrowserLike, policy: ExistingTabPolicy): Promise<ExistingTabSelectionOutcome> {
+  const userMatch = await selectExistingUserTab(browser, policy, shouldCollectExistingTabDiagnostics(policy));
+  if (userMatch.page !== undefined) {
     return userMatch;
   }
 
@@ -223,7 +232,7 @@ async function selectExistingTab(browser: BrowserLike, policy: ExistingTabPolicy
     if (selected !== undefined) {
       const normalized = normalizePage(selected);
       if (await pageMatchesExistingTarget(normalized, policy)) {
-        return normalized;
+        return { page: normalized };
       }
     }
   }
@@ -233,38 +242,52 @@ async function selectExistingTab(browser: BrowserLike, policy: ExistingTabPolicy
     if (tab !== undefined) {
       const normalized = normalizePage(tab);
       if (await pageMatchesExistingTarget(normalized, policy)) {
-        return normalized;
+        return { page: normalized };
       }
     }
   }
 
-  return undefined;
+  return userMatch.diagnostics === undefined
+    ? { diagnostics: diagnosticsForUnavailableUserTabs(policy) }
+    : userMatch;
 }
 
-async function selectExistingUserTab(browser: BrowserLike, policy: ExistingTabPolicy): Promise<PageLike | undefined> {
+async function selectExistingUserTab(
+  browser: BrowserLike,
+  policy: ExistingTabPolicy,
+  collectDiagnostics: boolean
+): Promise<ExistingTabSelectionOutcome> {
   const openTabs = browser.user?.openTabs;
   const claimTab = browser.user?.claimTab;
   if (typeof openTabs !== "function" || typeof claimTab !== "function") {
-    return undefined;
+    return {};
   }
 
-  const tabs = await Promise.resolve(openTabs.call(browser.user)).catch(() => []);
+  const tabs = await Promise.resolve(openTabs.call(browser.user)).catch(() => undefined);
+  if (tabs === undefined) {
+    return collectDiagnostics
+      ? { diagnostics: diagnosticsForUnavailableUserTabs(policy, "user_open_tabs_unavailable") }
+      : {};
+  }
   const matches = tabs.filter(tab => userTabMatchesTarget(tab, policy));
+  const diagnostics = collectDiagnostics ? diagnosticsForUserTabs(policy, tabs, matches) : undefined;
 
   if (matches.length === 0) {
-    return undefined;
+    return diagnostics === undefined ? {} : { diagnostics };
   }
 
   if (matches.length > 1 && (policy.ifMultiple ?? "block") !== "first") {
     throw new ExistingTabSelectionError(
       "Multiple already-open ChatGPT tabs matched the requested existing-tab target.",
       "existing_tab_ambiguous",
-      matches
+      matches,
+      diagnostics
     );
   }
 
   const selected = matches[0]!;
-  return normalizePage(await claimTab.call(browser.user, selected));
+  const page = normalizePage(await claimTab.call(browser.user, selected));
+  return diagnostics === undefined ? { page } : { page, diagnostics };
 }
 
 function userTabMatchesTarget(tab: BrowserUserTabInfo, policy: ExistingTabPolicy): boolean {
@@ -289,6 +312,110 @@ function userTabMatchesTarget(tab: BrowserUserTabInfo, policy: ExistingTabPolicy
   }
 }
 
+function diagnosticsForUserTabs(
+  policy: ExistingTabPolicy,
+  tabs: BrowserUserTabInfo[],
+  matches: BrowserUserTabInfo[]
+): ExistingTabDiagnostics {
+  const chatgptTabs = tabs.filter(tab => isChatGPTUrl(tab.url));
+  const candidateTabs = matches.length > 1 ? matches : chatgptTabs;
+  const cappedTabs = candidateTabs.slice(0, MAX_EXISTING_TAB_DIAGNOSTIC_CANDIDATES);
+  const diagnostics: ExistingTabDiagnostics = {
+    requestedTarget: diagnosticTarget(policy.target ?? { type: "selected", host: "chatgpt" }),
+    userOpenTabsAvailable: true,
+    chatgptTabCount: chatgptTabs.length,
+    mismatchReason: matches.length > 1 ? "multiple_candidates" : mismatchReasonForNoMatches(policy, tabs, chatgptTabs),
+    candidateTabs: cappedTabs.map(diagnosticCandidate)
+  };
+  const omittedCandidateCount = candidateTabs.length - cappedTabs.length;
+  if (omittedCandidateCount > 0) diagnostics.omittedCandidateCount = omittedCandidateCount;
+  return diagnostics;
+}
+
+function shouldCollectExistingTabDiagnostics(policy: ExistingTabPolicy): boolean {
+  return (policy.ifMissing ?? "block") === "block" || (policy.ifMultiple ?? "block") !== "first";
+}
+
+function diagnosticsForUnavailableUserTabs(
+  policy: ExistingTabPolicy,
+  mismatchReason: ExistingTabDiagnostics["mismatchReason"] | undefined = undefined
+): ExistingTabDiagnostics {
+  const target = policy.target ?? { type: "selected", host: "chatgpt" };
+  return {
+    requestedTarget: diagnosticTarget(target),
+    userOpenTabsAvailable: false,
+    chatgptTabCount: 0,
+    mismatchReason: mismatchReason ?? (target.type === "tabId" ? "explicit_tab_id_not_open" : "selected_tab_unavailable"),
+    candidateTabs: []
+  };
+}
+
+function diagnosticTarget(target: ExistingTabTarget): ExistingTabDiagnostics["requestedTarget"] {
+  switch (target.type) {
+    case "selected": {
+      const value: ExistingTabDiagnostics["requestedTarget"] = { type: target.type };
+      if (target.host !== undefined) value.host = target.host;
+      return value;
+    }
+    case "tabId":
+      return { type: target.type, tabId: target.tabId };
+    case "conversationId":
+    case "conversation_id":
+      return { type: target.type, conversationId: target.conversationId };
+    case "url":
+      return { type: target.type, url: target.url };
+    case "title": {
+      const value: ExistingTabDiagnostics["requestedTarget"] = { type: target.type, title: target.title };
+      if (target.exact !== undefined) value.exact = target.exact;
+      return value;
+    }
+  }
+}
+
+function diagnosticCandidate(tab: BrowserUserTabInfo): ExistingTabDiagnostics["candidateTabs"][number] {
+  const candidate: ExistingTabDiagnostics["candidateTabs"][number] = { id: tab.id };
+  if (tab.url !== undefined) {
+    candidate.url = truncateDiagnosticField(tab.url);
+    const conversationId = parseConversationId(tab.url);
+    if (conversationId !== undefined) candidate.conversationId = conversationId;
+  }
+  if (tab.title !== undefined) candidate.title = truncateDiagnosticField(tab.title);
+  if (tab.lastOpened !== undefined) candidate.lastOpened = truncateDiagnosticField(tab.lastOpened);
+  if (tab.tabGroup !== undefined) candidate.tabGroup = truncateDiagnosticField(tab.tabGroup);
+  return candidate;
+}
+
+function truncateDiagnosticField(value: string): string {
+  return value.length <= MAX_EXISTING_TAB_DIAGNOSTIC_FIELD_LENGTH
+    ? value
+    : `${value.slice(0, MAX_EXISTING_TAB_DIAGNOSTIC_FIELD_LENGTH - 1)}…`;
+}
+
+function mismatchReasonForNoMatches(
+  policy: ExistingTabPolicy,
+  tabs: BrowserUserTabInfo[],
+  chatgptTabs: BrowserUserTabInfo[]
+): ExistingTabDiagnostics["mismatchReason"] {
+  const target = policy.target ?? { type: "selected", host: "chatgpt" };
+  if (tabs.length === 0) return "no_candidate";
+  if (chatgptTabs.length === 0 && (policy.requireChatGPT ?? targetRequiresChatGPT(target))) {
+    return "non_chatgpt_tab";
+  }
+  switch (target.type) {
+    case "tabId":
+      return tabs.some(tab => tab.id === target.tabId) ? "non_chatgpt_tab" : "explicit_tab_id_not_open";
+    case "conversationId":
+    case "conversation_id":
+      return "conversation_id_mismatch";
+    case "url":
+      return "url_mismatch";
+    case "title":
+      return "title_mismatch";
+    case "selected":
+      return "selected_tab_unavailable";
+  }
+}
+
 async function pageMatchesExistingTarget(page: PageLike, policy: ExistingTabPolicy): Promise<boolean> {
   const url = await Promise.resolve(page.url?.()).catch(() => undefined);
   const title = await Promise.resolve(page.title?.()).catch(() => undefined);
@@ -303,9 +430,9 @@ async function findExistingChatGPTTab(browser: BrowserLike): Promise<PageLike | 
     target: { type: "selected", host: "chatgpt" },
     ifMultiple: "first",
     requireChatGPT: true
-  });
-  if (userTab !== undefined) {
-    return userTab;
+  }, false);
+  if (userTab.page !== undefined) {
+    return userTab.page;
   }
 
   const selected = browser.tabs?.selected;
@@ -347,8 +474,13 @@ async function findExistingChatGPTTab(browser: BrowserLike): Promise<PageLike | 
 }
 
 class ExistingTabSelectionError extends ChatGPTControlError {
-  constructor(message: string, code: string, candidates: BrowserUserTabInfo[] = []) {
-    super(message, "not_found", true, undefined, {
+  constructor(
+    message: string,
+    code: string,
+    candidates: BrowserUserTabInfo[] = [],
+    diagnostics?: ExistingTabDiagnostics
+  ) {
+    const details: ConstructorParameters<typeof ChatGPTControlError>[4] = {
       code,
       candidates: candidates.map(tab => ({ label: userTabCandidateLabel(tab) })),
       remediation: [
@@ -363,7 +495,9 @@ class ExistingTabSelectionError extends ChatGPTControlError {
           userActionRequired: false
         }
       ]
-    });
+    };
+    if (diagnostics !== undefined) details.diagnostics = { existingTab: diagnostics };
+    super(message, "not_found", true, undefined, details);
   }
 }
 

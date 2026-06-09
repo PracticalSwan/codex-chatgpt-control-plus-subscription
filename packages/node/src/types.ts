@@ -36,6 +36,45 @@ export type CommandContext = {
   timestamp: string;
 };
 
+export type ExistingTabMismatchReason =
+  | "no_candidate"
+  | "multiple_candidates"
+  | "non_chatgpt_tab"
+  | "conversation_id_mismatch"
+  | "url_mismatch"
+  | "title_mismatch"
+  | "selected_tab_unavailable"
+  | "explicit_tab_id_not_open"
+  | "user_open_tabs_unavailable";
+
+export type ExistingTabDiagnosticTarget = {
+  type: string;
+  host?: string;
+  tabId?: string;
+  conversationId?: string;
+  url?: string;
+  title?: string;
+  exact?: boolean;
+};
+
+export type ExistingTabDiagnosticCandidate = {
+  id: string;
+  url?: string;
+  title?: string;
+  conversationId?: string;
+  lastOpened?: string;
+  tabGroup?: string;
+};
+
+export type ExistingTabDiagnostics = {
+  requestedTarget: ExistingTabDiagnosticTarget;
+  userOpenTabsAvailable: boolean;
+  chatgptTabCount: number;
+  mismatchReason: ExistingTabMismatchReason;
+  candidateTabs: ExistingTabDiagnosticCandidate[];
+  omittedCandidateCount?: number;
+};
+
 export type CommandResult<T = unknown> = {
   ok: boolean;
   status: CommandStatus;
@@ -63,6 +102,9 @@ export type CommandResult<T = unknown> = {
       label: string;
       role?: string;
     }>;
+    diagnostics?: {
+      existingTab?: ExistingTabDiagnostics;
+    };
     resumable?: boolean;
   };
   context: CommandContext;

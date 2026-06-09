@@ -27,6 +27,11 @@
       "schema": "backendResponse"
     },
     {
+      "case": "blocker_explanation_profiles",
+      "file": "blocker-explanation-profiles.json",
+      "schema": "backendResponse"
+    },
+    {
       "case": "command_descriptors",
       "file": "command-descriptors.json",
       "schema": "backendResponse"
@@ -39,6 +44,11 @@
     {
       "case": "doctor_bridge_upload",
       "file": "doctor-bridge-upload.json",
+      "schema": "commandResult"
+    },
+    {
+      "case": "existing_tab_diagnostics_blocker",
+      "file": "existing-tab-diagnostics-blocker.json",
       "schema": "commandResult"
     },
     {

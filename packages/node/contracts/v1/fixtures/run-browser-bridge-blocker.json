@@ -77,7 +77,7 @@
             "For Python browser-bridge smokes, keep the bridge-hosted Node backend JS execution alive and run scripts/http_stdio_relay.mjs with CHATGPT_BROWSER_BACKEND_HTTP_URL; a plain Python-spawned Node subprocess cannot inherit globalThis.agent.",
             "If this command was already running inside a bootstrapped bridge host, verify the Codex Chrome extension is installed and enabled, then restart Chrome or Codex before retrying."
           ],
-          "summary": "Resolve the reported blocker before resuming."
+          "summary": "browser_bridge_unavailable (codex_chrome_bridge_unavailable): Codex cannot access the ChatGPT browser bridge from this backend process. In an ordinary shell this is expected; for a live Codex Chrome run, bootstrap the Chrome plugin runtime with setupBrowserRuntime({ globals: globalThis }) before using globalThis.agent."
         },
         "id": "interruption_fixed",
         "message": "Codex cannot access the ChatGPT browser bridge from this backend process. In an ordinary shell this is expected; for a live Codex Chrome run, bootstrap the Chrome plugin runtime with setupBrowserRuntime({ globals: globalThis }) before using globalThis.agent.",

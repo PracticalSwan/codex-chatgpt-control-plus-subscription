@@ -1,0 +1,114 @@
+{
+  "ok": true,
+  "requestId": "req_blocker_explanation_profiles",
+  "result": {
+    "profiles": [
+      {
+        "category": "environment",
+        "kind": "browser_bridge_unavailable",
+        "severity": "blocked",
+        "title": "Browser bridge unavailable",
+        "userActionRequired": false
+      },
+      {
+        "category": "auth",
+        "kind": "login_required",
+        "severity": "action_required",
+        "title": "Login required",
+        "userActionRequired": true
+      },
+      {
+        "category": "auth",
+        "kind": "captcha",
+        "severity": "action_required",
+        "title": "Captcha or human verification required",
+        "userActionRequired": true
+      },
+      {
+        "category": "auth",
+        "kind": "rate_limit",
+        "severity": "action_required",
+        "title": "Rate limited",
+        "userActionRequired": true
+      },
+      {
+        "category": "runtime",
+        "kind": "modal",
+        "severity": "action_required",
+        "title": "Modal is blocking the page",
+        "userActionRequired": true
+      },
+      {
+        "category": "permission",
+        "kind": "permission",
+        "severity": "action_required",
+        "title": "Permission required",
+        "userActionRequired": true
+      },
+      {
+        "category": "user_confirmation",
+        "kind": "confirmation",
+        "severity": "action_required",
+        "title": "Confirmation required",
+        "userActionRequired": true
+      },
+      {
+        "category": "ui_drift",
+        "kind": "selector_drift",
+        "severity": "blocked",
+        "title": "Selector drift",
+        "userActionRequired": false
+      },
+      {
+        "category": "artifact",
+        "kind": "artifact_unavailable",
+        "severity": "warning",
+        "title": "Artifact unavailable",
+        "userActionRequired": false
+      },
+      {
+        "category": "ui_drift",
+        "kind": "artifact_selector_drift",
+        "severity": "blocked",
+        "title": "Artifact selector drift",
+        "userActionRequired": false
+      },
+      {
+        "category": "download",
+        "kind": "artifact_download_unavailable",
+        "severity": "warning",
+        "title": "Artifact download unavailable",
+        "userActionRequired": false
+      },
+      {
+        "category": "download",
+        "kind": "download_unavailable",
+        "severity": "warning",
+        "title": "Download unavailable",
+        "userActionRequired": false
+      },
+      {
+        "category": "upload",
+        "kind": "upload_failed",
+        "severity": "action_required",
+        "title": "Upload failed",
+        "userActionRequired": true
+      },
+      {
+        "category": "not_found",
+        "kind": "not_found",
+        "severity": "warning",
+        "title": "Target not found",
+        "userActionRequired": false
+      },
+      {
+        "category": "unknown",
+        "kind": "unknown",
+        "severity": "blocked",
+        "title": "Unknown blocker",
+        "userActionRequired": false
+      }
+    ]
+  },
+  "schemaVersion": "chatgpt.browser_control.backend_response.v1"
+}

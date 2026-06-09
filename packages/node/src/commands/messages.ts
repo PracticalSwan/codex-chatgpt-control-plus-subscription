@@ -38,6 +38,15 @@ type AssistantProgressSnapshot = {
   latestAssistantTurnIndex?: number;
 };
 
+type SendButtonState = {
+  available: boolean;
+  visible?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+  label?: string;
+  reason?: string;
+};
+
 export function isResponseComplete(snapshot: CompletionSnapshot): boolean {
   return snapshot.latestText.trim().length > 0
     && !isTransientAssistantText(snapshot.latestText)
@@ -101,13 +110,54 @@ export async function submitMessage(
   const previousTurnCount = args.previousTurnCount ?? await countPageMessages(page).catch(() => undefined);
 
   try {
-    try {
-      await sendButton(page).click?.();
-    } catch {
-      await page.keyboard?.press?.("Enter");
+    const ready = await waitForSendButtonReady(page, args.timeoutMs ?? 30000);
+    if (!ready.ready) {
+      const blocker: NonNullable<CommandResult<SubmitData>["blocker"]> = {
+        kind: ready.code === "attachment_processing" ? "upload_failed" : "selector_drift",
+        code: ready.code,
+        message: ready.message,
+        remediation: [
+          {
+            label: "Wait for composer",
+            instruction: "Wait for ChatGPT's composer and attachments to become ready, then retry without manually changing the page.",
+            userActionRequired: false
+          }
+        ],
+        resumable: true
+      };
+      if (ready.visibleText !== undefined) {
+        blocker.visibleText = ready.visibleText;
+      }
+      return {
+        ok: false,
+        status: "blocked",
+        warnings: [],
+        blocker,
+        context: await contextFromPage(page)
+      };
     }
 
-    const userTurn = await waitForSubmittedUserTurn(page, args.text, previousTurnCount, args.timeoutMs ?? 30000);
+    const timeoutMs = args.timeoutMs ?? 30000;
+    const startedAt = Date.now();
+    await clickSendControl(page);
+
+    let userTurn = await waitForSubmittedUserTurn(
+      page,
+      args.text,
+      previousTurnCount,
+      initialSubmitWaitMs(timeoutMs)
+    );
+    if (userTurn === undefined && Date.now() - startedAt < timeoutMs && await shouldRetryNoopSubmit(page, args.text)) {
+      await sleep(page, 250);
+      await clickSendControl(page);
+      userTurn = await waitForSubmittedUserTurn(
+        page,
+        args.text,
+        previousTurnCount,
+        Math.max(0, timeoutMs - (Date.now() - startedAt))
+      );
+    }
+
     if (userTurn === undefined) {
       const latestUser = await readLatestMessage(page, "user", "normalized_text");
       if (submittedUserTurnMatches(latestUser?.text, args.text)) {
@@ -120,7 +170,7 @@ export async function submitMessage(
       return {
         ok: false,
         status: "timeout",
-        warnings: [],
+        warnings: await sendTimeoutWarnings(page),
         error: {
           name: "SubmitTimeout",
           message: "No matching submitted user turn appeared before the timeout.",
@@ -137,6 +187,146 @@ export async function submitMessage(
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
+}
+
+async function clickSendControl(page: PageLike): Promise<void> {
+  try {
+    await sendButton(page).click?.();
+  } catch {
+    await page.keyboard?.press?.("Enter");
+  }
+}
+
+function initialSubmitWaitMs(timeoutMs: number): number {
+  return Math.min(3000, Math.max(500, Math.floor(timeoutMs / 3)));
+}
+
+async function shouldRetryNoopSubmit(page: PageLike, text: string | undefined): Promise<boolean> {
+  const state = await readSendButtonState(page).catch(() => ({ available: false } satisfies SendButtonState));
+  if (!isSendButtonReady(state)) {
+    return false;
+  }
+  if (text === undefined) {
+    return true;
+  }
+  const composerText = await readLocatorText(composerTextbox(page)).catch(() => "");
+  return submittedUserTurnMatches(composerText, text);
+}
+
+async function waitForSendButtonReady(
+  page: PageLike,
+  timeoutMs: number
+): Promise<
+  | { ready: true }
+  | { ready: false; code: "attachment_processing" | "send_button_not_ready"; message: string; visibleText?: string }
+> {
+  const started = Date.now();
+  let lastState: SendButtonState | undefined;
+  let lastVisibleText: string | undefined;
+
+  while (Date.now() - started < timeoutMs) {
+    const state = await readSendButtonState(page).catch(() => ({ available: true } satisfies SendButtonState));
+    lastState = state;
+    if (isSendButtonReady(state)) {
+      return { ready: true };
+    }
+
+    const visibleText = await readVisibleTextForSubmit(page).catch(() => undefined);
+    if (visibleText !== undefined && /uploading|processing|attaching|preparing|reading|scanning/i.test(visibleText)) {
+      lastVisibleText = visibleText.slice(0, 500);
+    }
+    await sleep(page, 250);
+  }
+
+  if (lastVisibleText !== undefined) {
+    return {
+      ready: false,
+      code: "attachment_processing",
+      message: "ChatGPT still appears to be processing an attachment, so the send button did not become ready.",
+      visibleText: lastVisibleText
+    };
+  }
+
+  return {
+    ready: false,
+    code: "send_button_not_ready",
+    message: `ChatGPT's send button did not become ready before timeout.${describeSendState(lastState)}`
+  };
+}
+
+function isSendButtonReady(state: SendButtonState): boolean {
+  if (!state.available) return false;
+  if (state.visible === false) return false;
+  if (state.disabled === true) return false;
+  if (state.busy === true) return false;
+  return true;
+}
+
+async function readSendButtonState(page: PageLike): Promise<SendButtonState> {
+  const locator = sendButton(page);
+  if (typeof locator.count === "function" && await locator.count().catch(() => 1) === 0) {
+    return { available: false, reason: "not_found" };
+  }
+  const visible = typeof locator.isVisible === "function" ? await locator.isVisible({ timeoutMs: 500 }).catch(() => undefined) : undefined;
+  if (typeof locator.evaluate !== "function") {
+    const state: SendButtonState = { available: true };
+    if (visible !== undefined) state.visible = visible;
+    return state;
+  }
+
+  const evaluated = await locator.evaluate(element => {
+    const htmlElement = element as HTMLElement;
+    const button = element as HTMLButtonElement;
+    return {
+      disabled: button.disabled === true
+        || element.getAttribute("disabled") !== null
+        || element.getAttribute("aria-disabled") === "true"
+        || element.getAttribute("data-disabled") === "true",
+      busy: element.getAttribute("aria-busy") === "true"
+        || htmlElement.className.toString().toLocaleLowerCase().includes("loading"),
+      label: element.getAttribute("aria-label")
+        ?? element.getAttribute("title")
+        ?? htmlElement.innerText
+        ?? element.textContent
+        ?? undefined
+    };
+  });
+
+  const state: SendButtonState = {
+    available: true,
+    disabled: evaluated.disabled,
+    busy: evaluated.busy
+  };
+  if (visible !== undefined) state.visible = visible;
+  if (evaluated.label !== undefined) state.label = evaluated.label;
+  return state;
+}
+
+async function readVisibleTextForSubmit(page: PageLike): Promise<string | undefined> {
+  if (typeof page.evaluate !== "function") {
+    return undefined;
+  }
+  return page.evaluate(() => document.body?.innerText ?? "");
+}
+
+async function sendTimeoutWarnings(page: PageLike): Promise<string[]> {
+  const state = await readSendButtonState(page).catch(() => undefined);
+  if (state === undefined || isSendButtonReady(state)) {
+    return [];
+  }
+  return [`Send button state after submit timeout:${describeSendState(state)}`];
+}
+
+function describeSendState(state: SendButtonState | undefined): string {
+  if (state === undefined) return "";
+  const parts: string[] = [];
+  if (!state.available) parts.push("available=false");
+  if (state.visible !== undefined) parts.push(`visible=${state.visible}`);
+  if (state.disabled !== undefined) parts.push(`disabled=${state.disabled}`);
+  if (state.busy !== undefined) parts.push(`busy=${state.busy}`);
+  if (state.label !== undefined && state.label.trim().length > 0) parts.push(`label=${JSON.stringify(state.label.trim().slice(0, 80))}`);
+  if (state.reason !== undefined) parts.push(`reason=${state.reason}`);
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 export async function waitForMessage(

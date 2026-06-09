@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { askMessage, readLatest, submittedUserTurnMatches, waitForMessage } from "../../src/commands/messages.js";
+import { askMessage, readLatest, submittedUserTurnMatches, submitMessage, waitForMessage } from "../../src/commands/messages.js";
 import { copyResponse } from "../../src/commands/response-actions.js";
 import {
   countMessages,
@@ -249,6 +249,133 @@ describe("extractMessagesFromHtml", () => {
     expect(result.data?.responseText).toBe("fallback-ok");
     expect(result.data?.complete).toBe(false);
     expect(result.warnings.join(" ")).toContain("completion was not confirmed");
+  });
+
+  it("waits for the send button to become ready before clicking", async () => {
+    let readinessChecks = 0;
+    let waitCalls = 0;
+    let submitted = false;
+    const send: LocatorLike = {
+      evaluate: async <T>() => {
+        readinessChecks += 1;
+        return {
+          disabled: readinessChecks < 3,
+          ariaDisabled: readinessChecks < 3 ? "true" : null,
+          busy: false,
+          label: "Send prompt"
+        } as T;
+      },
+      click: async () => {
+        if (readinessChecks < 3) {
+          throw new Error("send clicked before it was ready");
+        }
+        submitted = true;
+      }
+    };
+
+    const page: PageLike = {
+      evaluate: async <T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg?: A): Promise<T> => {
+        const source = String(fn);
+        if (source.includes("document.querySelectorAll(selector).length")) {
+          return (submitted ? 1 : 0) as T;
+        }
+        if (source.includes("roleNodes")) {
+          const snapshot: { latestText?: string; turnCount: number } = { turnCount: submitted ? 1 : 0 };
+          if (submitted) snapshot.latestText = "Reply exactly ready.";
+          return snapshot as T;
+        }
+        if (source.includes("node?.innerText")) {
+          return (submitted ? "Reply exactly ready." : "") as T;
+        }
+        if (source.includes("document.body?.innerText")) {
+          return "New chat Chat with ChatGPT" as T;
+        }
+        throw new Error(`Unexpected evaluate call: ${source}`);
+      },
+      getByRole: (role, options) => {
+        const name = String(options?.name ?? "");
+        if (role === "button" && /Send prompt/.test(name)) return send;
+        return { count: async () => 0, isVisible: async () => false };
+      },
+      waitForTimeout: async () => {
+        waitCalls += 1;
+      },
+      title: async () => "ChatGPT",
+      url: () => "https://chatgpt.com/"
+    };
+
+    const result = await submitMessage({ page }, {
+      text: "Reply exactly ready.",
+      previousTurnCount: 0,
+      timeoutMs: 500
+    });
+
+    expect(result.ok).toBe(true);
+    expect(submitted).toBe(true);
+    expect(readinessChecks).toBeGreaterThanOrEqual(3);
+    expect(waitCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("retries submit when the first send click leaves the prompt in the composer", async () => {
+    let clickCount = 0;
+    let submitted = false;
+    const prompt = "Reply exactly retry-ready.";
+    const send: LocatorLike = {
+      evaluate: async <T>() => ({
+        disabled: false,
+        busy: false,
+        label: "Send prompt"
+      } as T),
+      click: async () => {
+        clickCount += 1;
+        if (clickCount >= 2) {
+          submitted = true;
+        }
+      }
+    };
+    const textbox: LocatorLike = {
+      innerText: async () => submitted ? "" : prompt
+    };
+
+    const page: PageLike = {
+      evaluate: async <T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg?: A): Promise<T> => {
+        const source = String(fn);
+        if (source.includes("document.querySelectorAll(selector).length")) {
+          return (submitted ? 1 : 0) as T;
+        }
+        if (source.includes("roleNodes")) {
+          const snapshot: { latestText?: string; turnCount: number } = { turnCount: submitted ? 1 : 0 };
+          if (submitted) snapshot.latestText = prompt;
+          return snapshot as T;
+        }
+        if (source.includes("node?.innerText")) {
+          return (submitted ? prompt : "") as T;
+        }
+        if (source.includes("document.body?.innerText")) {
+          return "New chat Chat with ChatGPT" as T;
+        }
+        throw new Error(`Unexpected evaluate call: ${source}`);
+      },
+      getByRole: (role, options) => {
+        const name = String(options?.name ?? "");
+        if (role === "button" && /Send prompt/.test(name)) return send;
+        if (role === "textbox") return textbox;
+        return { count: async () => 0, isVisible: async () => false };
+      },
+      waitForTimeout: async () => {},
+      title: async () => "ChatGPT",
+      url: () => "https://chatgpt.com/"
+    };
+
+    const result = await submitMessage({ page }, {
+      text: prompt,
+      previousTurnCount: 0,
+      timeoutMs: 1000
+    });
+
+    expect(result.ok).toBe(true);
+    expect(clickCount).toBe(2);
+    expect(submitted).toBe(true);
   });
 
   it("extracts assistant Markdown by default without flattening structure", () => {

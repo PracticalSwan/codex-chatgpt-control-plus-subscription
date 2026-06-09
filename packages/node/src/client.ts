@@ -53,6 +53,7 @@ import {
 } from "./runner/responses.js";
 import { streamFromRunResult } from "./runner/stream.js";
 import { redactReportValue, type ReportRedactionOptions } from "./safety/report-redaction.js";
+import { explainCommandBlocker, type BlockerExplanation, type ExplainBlockerOptions } from "./diagnostics/blockers.js";
 
 export type ChatGPTClientOptions = RuntimeEnv & {
   defaults?: {
@@ -158,6 +159,7 @@ export type ChatGPTClient = {
   runPlan(plan: SequencePlan | NamedWorkflowInvocation): Promise<CommandResult<unknown>>;
   doctor(args?: DoctorArgs): Promise<CommandResult<DoctorReport>>;
   createReport(result: CommandResult<unknown>, args?: RunReportOptions): Promise<CommandResult<RunReportData>>;
+  explainBlocker(resultOrBlocker: CommandResult<unknown> | NonNullable<CommandResult["blocker"]> | undefined, options?: ExplainBlockerOptions): BlockerExplanation;
   reports: {
     create(result: CommandResult<unknown>, args?: RunReportOptions): Promise<CommandResult<RunReportData>>;
     redact(value: unknown, args?: ReportRedactionOptions): Promise<CommandResult<unknown>>;
@@ -229,6 +231,7 @@ export function createChatGPT(options: ChatGPTClientOptions = {}): ChatGPTClient
     runPlan: plan => runPlanInvocation(plan, env, limits, options.defaults, options.reporting),
     doctor: args => doctor(env, args),
     createReport: (result, args) => createRunReport(env, result, args ?? options.reporting ?? {}),
+    explainBlocker: (resultOrBlocker, args) => explainCommandBlocker(resultOrBlocker, args),
     reports: {
       create: (result, args) => createRunReport(env, result, args ?? options.reporting ?? {}),
       redact: async (value, args) => resultOk(redactReportValue(value, args), {}),

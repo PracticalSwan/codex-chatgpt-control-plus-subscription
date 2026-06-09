@@ -60,6 +60,18 @@ await chatgpt.askWithFiles({
 
 Use the second example only when the backend process itself is running on Windows. If the backend runs in WSL/Linux, pass the WSL/Linux path, such as `/home/you/Documents/report.pdf`.
 
+Explain structured blockers before deciding whether to retry:
+
+```ts
+const result = await chatgpt.session.bootstrap({ existingTab: true });
+if (!result.ok) {
+  const explanation = chatgpt.explainBlocker(result, { command: "session.bootstrap" });
+  console.log(explanation.markdown);
+}
+```
+
+`explainBlocker` preserves the original `result.blocker` fields and adds conservative retry/resume guidance. Existing-tab blockers include metadata such as requested target, candidate tab IDs, URLs, titles, conversation IDs, and mismatch reason; they do not include page text or chat content.
+
 ## Validation
 
 Run deterministic gates:

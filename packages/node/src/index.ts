@@ -13,6 +13,7 @@ export * from "./dom/fixtures.js";
 export * from "./safety/blockers.js";
 export * from "./safety/redaction.js";
 export * from "./safety/report-redaction.js";
+export * from "./diagnostics/blockers.js";
 export * from "./commands/session.js";
 export * from "./commands/threads.js";
 export * from "./commands/messages.js";
