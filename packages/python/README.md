@@ -87,8 +87,22 @@ The `ChatGPT` facade exposes workflows and primitive command groups:
 - `chatgpt.reports.create(...)`
 - `chatgpt.session`, `threads`, `messages`, `files`, `modes`, `tools`, `response`
 - `chatgpt.commands()`, `describe(...)`, `help(...)`
+- `chatgpt.explain_blocker(result_or_blocker, ...)` and module-level `explain_blocker(...)`
 
 Unsupported OpenAI API-only Responses fields, such as `model`, `temperature`, and `previous_response_id`, return explicit unsupported responses instead of silently submitting misleading prompts.
+
+## Blocker Explainability
+
+`explain_blocker(...)` preserves backend blocker dictionaries and returns structured fields plus Markdown for logs or CLI output:
+
+```python
+result = chatgpt.session.bootstrap(existing_tab=True)
+if not result.ok:
+    explanation = chatgpt.explain_blocker(result, command="session.bootstrap")
+    print(explanation["markdown"])
+```
+
+Existing-tab blockers expose only safe metadata: requested target, candidate tab IDs, URLs, titles, conversation IDs, omitted candidate count, and mismatch reason. They do not include page text or chat content.
 
 ## Host-Local Attachment Paths
 

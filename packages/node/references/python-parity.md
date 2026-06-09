@@ -30,6 +30,12 @@ claimed conversation in a temporary bridge-owned tab and exporting through
 `pageAssets`, Python observes the same command result through the backend
 protocol without any Python-side browser logic.
 
+Blocker explainability follows the same rule. TypeScript owns blocker creation,
+runner interruption decisions, and existing-tab diagnostics. Python exposes
+`explain_blocker(...)` over the backend blocker dictionary and is checked against
+the shared `blocker-explanation-profiles.json` and
+`existing-tab-diagnostics-blocker.json` contract fixtures.
+
 ## Host-Local Attachment Paths
 
 Python does not reinterpret attachment paths. It sends the path string to the Node backend, and the backend validates the path against its own host operating system. Attachment paths must be absolute on the backend host. On macOS/Linux/WSL backends, use POSIX paths such as `/example/user/file.pdf` or `/mnt/c/example/user/file.pdf`. On Windows backends, use fully qualified paths such as `C:\Users\you\file.pdf` or UNC paths such as `\\server\share\file.pdf`. Drive-relative paths, root-relative paths, and Windows-looking paths sent to a POSIX backend are rejected before filesystem access.

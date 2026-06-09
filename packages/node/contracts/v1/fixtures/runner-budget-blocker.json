@@ -42,7 +42,7 @@
           "steps": [
             "Ask the user to approve this specific over-budget run, or reduce the number of prompts, thread opens, or message reads."
           ],
-          "summary": "Resolve the reported blocker before resuming."
+          "summary": "confirmation (run_budget_exceeded): Workflow \"agent-run:budget-agent\" exceeds ChatGPT browser-control run budget: prompts 1/0. Ask the user to confirm a bounded exception."
         },
         "id": "interruption_fixed",
         "message": "Workflow \"agent-run:budget-agent\" exceeds ChatGPT browser-control run budget: prompts 1/0. Ask the user to confirm a bounded exception.",

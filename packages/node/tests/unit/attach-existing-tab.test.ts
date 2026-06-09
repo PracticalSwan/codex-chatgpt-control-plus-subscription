@@ -194,13 +194,17 @@ describe("existing Chrome tab bootstrap", () => {
   });
 
   it("blocks when an explicit existing conversation target is not open", async () => {
+    const claimed: unknown[] = [];
     const browser: BrowserLike = {
       name: "chrome",
       user: {
         openTabs: async () => [
           { id: "other", url: "https://chatgpt.com/c/other", title: "Other Chat" }
         ],
-        claimTab: async () => fakeChatGPTPage("other", "https://chatgpt.com/c/other", "Other Chat")
+        claimTab: async tab => {
+          claimed.push(tab);
+          throw new Error("claimTab should not be called for a missing existing-tab target.");
+        }
       }
     };
 
@@ -216,6 +220,93 @@ describe("existing Chrome tab bootstrap", () => {
     expect(result.blocker).toMatchObject({
       kind: "not_found",
       code: "existing_tab_not_found"
+    });
+    expect(result.blocker?.diagnostics?.existingTab).toEqual({
+      requestedTarget: {
+        type: "conversationId",
+        conversationId: "abc-123"
+      },
+      userOpenTabsAvailable: true,
+      chatgptTabCount: 1,
+      mismatchReason: "conversation_id_mismatch",
+      candidateTabs: [
+        {
+          id: "other",
+          url: "https://chatgpt.com/c/other",
+          title: "Other Chat",
+          conversationId: "other"
+        }
+      ]
+    });
+    expect(claimed).toEqual([]);
+    expect(JSON.stringify(result.blocker?.diagnostics)).not.toContain("say hi");
+  });
+
+  it("reports user-open tab enumeration failures without losing the failure reason", async () => {
+    const browser: BrowserLike = {
+      name: "chrome",
+      user: {
+        openTabs: async () => {
+          throw new Error("user tabs unavailable");
+        },
+        claimTab: async () => {
+          throw new Error("claimTab should not be called when openTabs fails.");
+        }
+      }
+    };
+
+    const result = await bootstrap({ browser }, {
+      existingTab: {
+        target: { type: "conversationId", conversationId: "abc-123" },
+        ifMissing: "block"
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.blocker?.diagnostics?.existingTab).toEqual({
+      requestedTarget: {
+        type: "conversationId",
+        conversationId: "abc-123"
+      },
+      userOpenTabsAvailable: false,
+      chatgptTabCount: 0,
+      mismatchReason: "user_open_tabs_unavailable",
+      candidateTabs: []
+    });
+  });
+
+  it("caps and truncates existing-tab diagnostic candidates", async () => {
+    const longTitle = `SDK Review ${"x".repeat(280)}`;
+    const browser: BrowserLike = {
+      name: "chrome",
+      user: {
+        openTabs: async () => Array.from({ length: 12 }, (_, index) => ({
+          id: `tab-${index + 1}`,
+          url: `https://chatgpt.com/c/other-${index + 1}`,
+          title: index === 0 ? longTitle : `Other Chat ${index + 1}`
+        })),
+        claimTab: async () => {
+          throw new Error("claimTab should not be called for a missing existing-tab target.");
+        }
+      }
+    };
+
+    const result = await bootstrap({ browser }, {
+      existingTab: {
+        target: { type: "conversationId", conversationId: "abc-123" },
+        ifMissing: "block"
+      }
+    });
+
+    const diagnostics = result.blocker?.diagnostics?.existingTab;
+    expect(result.ok).toBe(false);
+    expect(diagnostics?.candidateTabs).toHaveLength(10);
+    expect(diagnostics?.omittedCandidateCount).toBe(2);
+    expect(diagnostics?.candidateTabs[0]?.title).toHaveLength(240);
+    expect(diagnostics?.candidateTabs[0]?.title?.endsWith("…")).toBe(true);
+    expect(diagnostics?.candidateTabs[9]).toMatchObject({
+      id: "tab-10",
+      conversationId: "other-10"
     });
   });
 
@@ -248,6 +339,29 @@ describe("existing Chrome tab bootstrap", () => {
       "tab one - SDK Review - https://chatgpt.com/c/one",
       "tab two - SDK Review - https://chatgpt.com/c/two"
     ]);
+    expect(result.blocker?.diagnostics?.existingTab).toMatchObject({
+      requestedTarget: {
+        type: "title",
+        title: "SDK Review"
+      },
+      userOpenTabsAvailable: true,
+      chatgptTabCount: 2,
+      mismatchReason: "multiple_candidates",
+      candidateTabs: [
+        {
+          id: "one",
+          url: "https://chatgpt.com/c/one",
+          title: "SDK Review",
+          conversationId: "one"
+        },
+        {
+          id: "two",
+          url: "https://chatgpt.com/c/two",
+          title: "SDK Review",
+          conversationId: "two"
+        }
+      ]
+    });
   });
 });
 

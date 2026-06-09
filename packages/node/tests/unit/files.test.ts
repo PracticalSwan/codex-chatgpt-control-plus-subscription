@@ -135,6 +135,65 @@ describe("attachFiles", () => {
     expect(uploadedPaths).toEqual([file]);
   });
 
+  it("waits for attached files to finish processing before returning success", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chatgpt-control-attach-processing-"));
+    const file = join(dir, "notes.txt");
+    await writeFile(file, "hello");
+
+    let uploadedPaths: string[] = [];
+    let processing = true;
+    let readinessChecks = 0;
+    let waitCalls = 0;
+
+    const visibleInput: LocatorLike = {
+      count: async () => 1,
+      isVisible: async () => true,
+      click: async () => {}
+    };
+    const messageLocator: LocatorLike = {
+      count: async () => 0
+    };
+
+    const page: PageLike = {
+      locator: (selector: string) => {
+        if (selector === "#upload-files") return visibleInput;
+        if (selector.includes("data-message-author-role")) return messageLocator;
+        return { count: async () => 0 };
+      },
+      waitForEvent: async () => ({
+        isMultiple: async () => true,
+        setFiles: async (paths: string[]) => {
+          uploadedPaths = paths;
+        }
+      }),
+      evaluate: async <T, A = unknown>(_fn: (arg: A) => T | Promise<T>, _arg?: A): Promise<T> => {
+        readinessChecks += 1;
+        return {
+          files: [
+            { name: "notes.txt", visible: !processing }
+          ],
+          processing,
+          processingText: processing ? "Uploading notes.txt" : undefined
+        } as T;
+      },
+      waitForTimeout: async () => {
+        waitCalls += 1;
+        if (waitCalls > 1) {
+          processing = false;
+        }
+      },
+      title: async () => "ChatGPT",
+      url: () => "https://chatgpt.com/"
+    };
+
+    const result = await attachFiles({ page }, { paths: [file], timeoutMs: 500 });
+
+    expect(result.ok).toBe(true);
+    expect(uploadedPaths).toEqual([file]);
+    expect(readinessChecks).toBeGreaterThan(1);
+    expect(waitCalls).toBeGreaterThan(1);
+  });
+
   it("returns a permission blocker when no upload primitive is available", async () => {
     const dir = await mkdtemp(join(tmpdir(), "chatgpt-control-attach-blocked-"));
     const file = join(dir, "notes.txt");

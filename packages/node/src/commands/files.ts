@@ -24,6 +24,12 @@ import { localGuardTimeout } from "./timeouts.js";
 const CODEX_UPLOAD_PERMISSION_FIX = "Codex Settings > Computer Use > Chrome > Permissions > Uploads: set to Always allow, or add chatgpt.com to the allowed upload domains.";
 const CHROME_FILE_URL_PERMISSION_FIX = "Chrome chrome://extensions > Codex extension > Details: enable Allow access to file URLs.";
 
+type AttachmentReadinessSnapshot = {
+  files: Array<{ name: string; visible: boolean }>;
+  processing: boolean;
+  processingText?: string;
+};
+
 export async function validateAttachPaths(paths: string[]): Promise<AttachedFile[]> {
   const files: AttachedFile[] = [];
 
@@ -62,6 +68,37 @@ export async function attachFiles(
     await uploadFiles(page, files, args.timeoutMs ?? 30000);
 
     await page.waitForTimeout?.(args.timeoutMs === undefined ? 1000 : Math.min(args.timeoutMs, 3000));
+    const readiness = await waitForAttachedFilesReady(page, files, args.timeoutMs ?? 30000);
+    if (!readiness.ready) {
+      const blocker: NonNullable<CommandResult<AttachFilesData>["blocker"]> = {
+        kind: "upload_failed",
+        code: "attachment_processing",
+        message: "ChatGPT still appears to be processing the attached file, so the prompt was not submitted.",
+        remediation: [
+          {
+            label: "Wait for upload",
+            instruction: "Wait until the visible attachment finishes uploading or processing, then retry the askWithFiles call.",
+            userActionRequired: false
+          },
+          {
+            label: "Retry smaller file",
+            instruction: "If processing never finishes, retry with a smaller file or a different supported file type.",
+            userActionRequired: true
+          }
+        ],
+        resumable: true
+      };
+      if (readiness.processingText !== undefined) {
+        blocker.visibleText = readiness.processingText;
+      }
+      return {
+        ok: false,
+        status: "blocked",
+        warnings: [],
+        blocker,
+        context: await contextFromPage(page)
+      };
+    }
     return resultOk({ files }, await contextFromPage(page));
   } catch (error) {
     if (isUploadBridgeBlocker(error)) {
@@ -82,6 +119,89 @@ export async function attachFiles(
     }
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
+}
+
+async function waitForAttachedFilesReady(
+  page: PageLike,
+  files: AttachedFile[],
+  timeoutMs: number
+): Promise<{ ready: true } | { ready: false; processingText?: string }> {
+  const started = Date.now();
+  let lastProcessingText: string | undefined;
+
+  while (Date.now() - started < timeoutMs) {
+    const snapshot = await readAttachmentReadiness(page, files).catch(() => undefined);
+    if (snapshot === undefined) {
+      return { ready: true };
+    }
+
+    const allNamesVisible = snapshot.files.length > 0 && snapshot.files.every(file => file.visible);
+    if (!snapshot.processing && allNamesVisible) {
+      return { ready: true };
+    }
+    if (!snapshot.processing && Date.now() - started >= Math.min(timeoutMs, 1000)) {
+      return { ready: true };
+    }
+
+    if (snapshot.processingText !== undefined) {
+      lastProcessingText = snapshot.processingText;
+    }
+    await page.waitForTimeout?.(250);
+  }
+
+  const blocked: { ready: false; processingText?: string } = { ready: false };
+  if (lastProcessingText !== undefined) {
+    blocked.processingText = lastProcessingText;
+  }
+  return blocked;
+}
+
+async function readAttachmentReadiness(
+  page: PageLike,
+  files: AttachedFile[]
+): Promise<AttachmentReadinessSnapshot | undefined> {
+  if (typeof page.evaluate !== "function") {
+    return undefined;
+  }
+
+  return page.evaluate((fileNames: string[]) => {
+    const visibleText = document.body?.innerText ?? "";
+    const normalize = (value: string) => value.toLocaleLowerCase();
+    const normalizedVisibleText = normalize(visibleText);
+    const files = fileNames.map(name => ({
+      name,
+      visible: normalizedVisibleText.includes(normalize(name))
+    }));
+
+    const attachmentSelectors = [
+      "[data-testid*='attachment' i]",
+      "[data-testid*='file' i]",
+      "[aria-label*='attachment' i]",
+      "[aria-label*='upload' i]",
+      "[aria-label*='file' i]",
+      "[class*='attachment' i]",
+      "[class*='upload' i]",
+      "[class*='file' i]",
+      "[role='progressbar']"
+    ].join(", ");
+    const attachmentText = Array.from(document.querySelectorAll(attachmentSelectors))
+      .map(element => [
+        element.textContent ?? "",
+        element.getAttribute("aria-label") ?? "",
+        element.getAttribute("title") ?? ""
+      ].join(" "))
+      .join(" ");
+    const relevantText = attachmentText.length > 0 ? attachmentText : visibleText;
+    const processingMatch = /\b(uploading|processing|attaching|preparing|reading|scanning|analyzing)\b/i.exec(relevantText);
+    const snapshot: AttachmentReadinessSnapshot = {
+      files,
+      processing: processingMatch !== null
+    };
+    if (processingMatch !== null) {
+      snapshot.processingText = relevantText.slice(0, 500);
+    }
+    return snapshot;
+  }, files.map(file => file.name));
 }
 
 async function uploadFiles(page: NonNullable<RuntimeEnv["page"]>, files: AttachedFile[], timeoutMs: number): Promise<void> {

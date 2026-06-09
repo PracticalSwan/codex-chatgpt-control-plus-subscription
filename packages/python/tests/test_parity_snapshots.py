@@ -86,6 +86,23 @@ class PythonParitySnapshotTests(unittest.TestCase):
                     wire = model.to_wire()
                     self.assertEqual(event_model.from_wire(wire).to_wire(), wire)
 
+    def test_existing_tab_diagnostics_fixture_preserves_metadata_only(self) -> None:
+        payload = json.loads(
+            (CONTRACT / "fixtures" / "existing-tab-diagnostics-blocker.json").read_text(encoding="utf-8")
+        )
+        model = CommandResult.from_wire(payload["result"])
+        wire = model.to_wire()
+        diagnostics = wire["blocker"]["diagnostics"]["existingTab"]
+
+        self.assertEqual(diagnostics["requestedTarget"], {
+            "type": "conversationId",
+            "conversationId": "abc-123",
+        })
+        self.assertEqual(diagnostics["mismatchReason"], "conversation_id_mismatch")
+        self.assertEqual(diagnostics["candidateTabs"][0]["conversationId"], "other")
+        self.assertNotIn("visibleText", diagnostics)
+        self.assertNotIn("content", diagnostics["candidateTabs"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

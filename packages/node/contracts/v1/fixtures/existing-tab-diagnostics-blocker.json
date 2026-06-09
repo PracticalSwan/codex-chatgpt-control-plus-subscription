@@ -1,0 +1,57 @@
+{
+  "result": {
+    "blocker": {
+      "candidates": [
+        {
+          "label": "tab other - Other Chat - https://chatgpt.com/c/other"
+        }
+      ],
+      "code": "existing_tab_not_found",
+      "diagnostics": {
+        "existingTab": {
+          "candidateTabs": [
+            {
+              "conversationId": "other",
+              "id": "other",
+              "title": "Other Chat",
+              "url": "https://chatgpt.com/c/other"
+            }
+          ],
+          "chatgptTabCount": 1,
+          "mismatchReason": "conversation_id_mismatch",
+          "requestedTarget": {
+            "conversationId": "abc-123",
+            "type": "conversationId"
+          },
+          "userOpenTabsAvailable": true
+        }
+      },
+      "kind": "not_found",
+      "message": "No already-open ChatGPT tab matched the requested existing-tab target.",
+      "remediation": [
+        {
+          "instruction": "Use the selected tab, a ChatGPT conversation URL, conversation ID, or a tab id returned by openTabs().",
+          "label": "Choose an exact tab",
+          "userActionRequired": false
+        },
+        {
+          "instruction": "Rerun with open-if-missing only if it is acceptable to open or create a ChatGPT tab instead of reusing an already-open one.",
+          "label": "Allow opening",
+          "userActionRequired": false
+        }
+      ]
+    },
+    "context": {
+      "timestamp": "2026-06-06T00:00:00.000Z"
+    },
+    "error": {
+      "message": "No already-open ChatGPT tab matched the requested existing-tab target.",
+      "name": "ExistingTabSelectionError",
+      "recoverable": true
+    },
+    "ok": false,
+    "status": "blocked",
+    "warnings": []
+  },
+  "schemaVersion": "chatgpt.browser_control.command_result.v1"
+}

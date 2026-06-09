@@ -182,7 +182,9 @@
       "id": "workflows-primitives-diagnostics",
       "summary": "High-level workflows, browser primitives, named macros, and doctor diagnostics.",
       "fixtures": [
+        "blocker-explanation-profiles.json",
         "doctor-bridge-upload.json",
+        "existing-tab-diagnostics-blocker.json",
         "primitive-bootstrap-blocker.json",
         "workflow-ask-success.json"
       ],

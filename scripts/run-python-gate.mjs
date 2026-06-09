@@ -42,7 +42,7 @@ if (gate === "test") {
   run(venvPython, ["-m", "compileall", "-q", "src", "examples"], { cwd: pythonRoot });
 } else if (gate === "pyright") {
   ensureVenv();
-  run(venvPython, ["-m", "pyright", "src", "tests"], { cwd: pythonRoot });
+  run(venvPython, ["-m", "pyright", "--pythonpath", venvPython, "src", "tests"], { cwd: pythonRoot });
 } else if (gate === "ordinary-shell") {
   run(npmCommand, ["--prefix", nodeRoot, "run", "bundle:backend"]);
   ensureVenv();

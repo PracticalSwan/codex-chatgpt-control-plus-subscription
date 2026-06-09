@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from .agent import Agent
 from .commands import CommandClient
+from .diagnostics import explain_blocker
 from .models import ChatGPTRunResult, SequencePlan
 from .primitives import (
     ArtifactsClient,
@@ -120,6 +121,9 @@ class ChatGPT:
 
     def create_report(self, result: dict[str, Any], **kwargs: Any):
         return self._workflows.create_report(result, **kwargs)
+
+    def explain_blocker(self, result_or_blocker: Any, **kwargs: Any) -> dict[str, Any]:
+        return explain_blocker(result_or_blocker, **kwargs)
 
     def commands(self, *, layer: str | None = None):
         return self._commands.commands(layer=layer)

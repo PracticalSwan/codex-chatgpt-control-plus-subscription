@@ -21,6 +21,7 @@ from .backend import (
 )
 from .client import ChatGPT, ChatGPTAgent, ChatGPTRunner
 from .commands import CommandClient
+from .diagnostics import explain_blocker
 from .models import (
     BackendCapabilities,
     BackendEvent,
@@ -79,6 +80,7 @@ __all__ = [
     "CommandDescriptor",
     "CommandResult",
     "DoctorReport",
+    "explain_blocker",
     "FilesClient",
     "MessagesClient",
     "ModesClient",

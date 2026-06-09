@@ -59,6 +59,13 @@
             }
           }
         },
+        "diagnostics": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "existingTab": { "$ref": "#/$defs/existingTabDiagnostics" }
+          }
+        },
         "resumable": { "type": "boolean" }
       }
     },
@@ -94,6 +101,47 @@
   "$defs": {
     "commandStatus": {
       "enum": ["ok", "partial", "timeout", "blocked", "needs_confirmation", "not_found", "unsupported", "error"]
+    },
+    "existingTabDiagnostics": {
+      "type": "object",
+      "required": ["requestedTarget", "userOpenTabsAvailable", "chatgptTabCount", "mismatchReason", "candidateTabs"],
+      "additionalProperties": true,
+      "properties": {
+        "requestedTarget": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "type": "string", "minLength": 1 },
+            "host": { "type": "string" },
+            "tabId": { "type": "string" },
+            "conversationId": { "type": "string" },
+            "url": { "type": "string" },
+            "title": { "type": "string" },
+            "exact": { "type": "boolean" }
+          }
+        },
+        "userOpenTabsAvailable": { "type": "boolean" },
+        "chatgptTabCount": { "type": "integer", "minimum": 0 },
+        "mismatchReason": { "type": "string", "minLength": 1 },
+        "omittedCandidateCount": { "type": "integer", "minimum": 0 },
+        "candidateTabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": true,
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "url": { "type": "string" },
+              "title": { "type": "string" },
+              "conversationId": { "type": "string" },
+              "lastOpened": { "type": "string" },
+              "tabGroup": { "type": "string" }
+            }
+          }
+        }
+      }
     }
   }
 }

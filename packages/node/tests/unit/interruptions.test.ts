@@ -36,6 +36,7 @@ describe("interruption mapping", () => {
     expect(interruption?.type).toBe("permission_required");
     expect(interruption?.command).toBe("files.attach");
     expect(interruption?.resume.supported).toBe(true);
+    expect(interruption?.fix?.summary).toContain("Upload permission required.");
     expect(interruption?.fix?.steps.join(" ")).toContain("Allow access to file URLs");
   });
 

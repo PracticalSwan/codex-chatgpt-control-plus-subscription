@@ -1,5 +1,6 @@
 import type { CommandResult } from "../types.js";
-import { augmentCommandBlocker, resumeDecisionForBlocker } from "./resume.js";
+import { explainCommandBlocker, type ExplainBlockerOptions } from "../diagnostics/blockers.js";
+import { augmentCommandBlocker } from "./resume.js";
 import type { ChatGPTCommandBlocker, ChatGPTInterruption } from "./types.js";
 
 export function interruptionFromCommandResult(
@@ -12,13 +13,19 @@ export function interruptionFromCommandResult(
 
   const id = `interruption-${Date.now().toString(36)}`;
   const blocker = result.blocker === undefined ? undefined : augmentCommandBlocker(result.blocker);
-  const remediation = blocker?.remediation ?? [];
+  const explanationOptions: ExplainBlockerOptions = {
+    context: result.context,
+    stateId: id
+  };
+  if (command !== undefined) explanationOptions.command = command;
+  const explanation = explainCommandBlocker(blocker ?? result, explanationOptions);
+  const remediation = explanation.remediation;
   const interruption: ChatGPTInterruption = {
     id,
     type: interruptionType(result, blocker),
     status: result.status,
     message: blocker?.message ?? result.error?.message ?? result.status,
-    resume: resumeDecisionForBlocker(blocker, id)
+    resume: explanation.resume
   };
 
   if (blocker !== undefined) {
@@ -28,7 +35,7 @@ export function interruptionFromCommandResult(
   if (command !== undefined) interruption.command = command;
   if (remediation.length > 0) {
     interruption.fix = {
-      summary: "Resolve the reported blocker before resuming.",
+      summary: explanation.summary,
       steps: remediation.map(step => step.instruction)
     };
   }
