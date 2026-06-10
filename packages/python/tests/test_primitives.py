@@ -38,6 +38,7 @@ class PrimitiveFacadeTests(unittest.TestCase):
             (lambda: chatgpt.artifacts.list_latest(kind="image"), "artifacts.listLatest", {"kind": "image"}),
             (lambda: chatgpt.artifacts.wait(kind="image", after_artifact_count=0, require_download=True), "artifacts.wait", {"kind": "image", "afterArtifactCount": 0, "requireDownload": True}),
             (lambda: chatgpt.artifacts.download_latest(dest_dir="/tmp", prefer="visible_image_source"), "artifacts.downloadLatest", {"destDir": "/tmp", "prefer": "visible_image_source"}),
+            (lambda: chatgpt.files.preflight(paths=["/tmp/a.txt"], max_total_bytes=100), "files.preflight", {"paths": ["/tmp/a.txt"], "maxTotalBytes": 100}),
             (lambda: chatgpt.files.attach(paths=["/tmp/a.txt"]), "files.attach", {"paths": ["/tmp/a.txt"]}),
             (lambda: chatgpt.files.download_latest(dest_dir="/tmp"), "files.downloadLatest", {"destDir": "/tmp"}),
             (lambda: chatgpt.modes.set(model="auto"), "modes.set", {"model": "auto"}),

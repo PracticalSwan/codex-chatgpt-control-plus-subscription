@@ -14,6 +14,7 @@ from codex_chatgpt_control.models import (
     CommandDescriptor,
     CommandResult,
     DoctorReport,
+    FilePreflightData,
     RunReportData,
     SequencePlan,
 )
@@ -141,9 +142,21 @@ class CompleteModelTests(unittest.TestCase):
         )
         self.assertEqual(doctor.checks["localization"].status, "unknown")
         self.assertEqual(doctor.checks["reports"].status, "unknown")
-        self.assertEqual(doctor.checks["file_preflight"].status, "unsupported")
-        self.assertEqual(doctor.checks["file_preflight"].code, "file_preflight_deferred")
+        self.assertEqual(doctor.checks["file_preflight"].status, "ok")
+        self.assertIsNotNone(doctor.checks["file_preflight"].details)
+        assert doctor.checks["file_preflight"].details is not None
+        self.assertEqual(doctor.checks["file_preflight"].details["totalBytes"], 16)
         self.assertIn("blockerKind", doctor.to_wire()["checks"]["existing_tab"])
+
+    def test_file_preflight_fixture_parses_metadata_aliases(self) -> None:
+        result = CommandResult.from_wire(load_json("files-preflight-success.json")["result"])
+        data = FilePreflightData.from_wire(result.data)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(data.total_bytes, 16)
+        self.assertEqual(data.files[0].name, "spec.md")
+        self.assertEqual(data.files[0].mime_type, "text/markdown")
+        self.assertIn("mimeType", data.to_wire()["files"][0])
 
 
 if __name__ == "__main__":

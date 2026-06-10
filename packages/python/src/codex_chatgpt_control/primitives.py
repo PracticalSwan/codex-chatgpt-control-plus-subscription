@@ -62,6 +62,9 @@ class FilesClient:
     def __init__(self, backend: Any) -> None:
         self._backend = backend
 
+    def preflight(self, **kwargs: Any) -> CommandResult:
+        return command_result(self._backend, "files.preflight", wire_kwargs(**kwargs))
+
     def attach(self, **kwargs: Any) -> CommandResult:
         return command_result(self._backend, "files.attach", wire_kwargs(**kwargs))
 

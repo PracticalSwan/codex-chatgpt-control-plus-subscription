@@ -36,6 +36,8 @@ from .models import (
     CommandDescriptor,
     CommandResult,
     DoctorReport,
+    FilePreflightData,
+    FilePreflightFile,
     RunReportData,
     SequencePlan,
 )
@@ -94,6 +96,8 @@ __all__ = [
     "CommandResult",
     "DoctorReport",
     "explain_blocker",
+    "FilePreflightData",
+    "FilePreflightFile",
     "FilesClient",
     "INTEGRITY_SCHEMA_VERSION",
     "MessagesClient",

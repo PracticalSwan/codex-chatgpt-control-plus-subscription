@@ -242,6 +242,20 @@ class DoctorReport(WireModel):
     checks: dict[str, CapabilityCheck]
 
 
+class FilePreflightFile(WireModel):
+    path: str
+    name: str
+    bytes: int
+    extension: str
+    mime_type: str = Field(alias="mimeType")
+    category: str
+
+
+class FilePreflightData(WireModel):
+    files: list[FilePreflightFile]
+    total_bytes: int = Field(alias="totalBytes")
+
+
 def _command_output_text(data: Any) -> str | None:
     if not isinstance(data, dict):
         return None

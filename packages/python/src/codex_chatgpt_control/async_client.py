@@ -291,7 +291,7 @@ class AsyncChatGPT:
             "read_latest": "messages.readLatest",
             "wait_and_read": "messages.waitAndRead",
         })
-        self.files = AsyncPrimitiveGroup(transport, {"attach": "files.attach", "download_latest": "files.downloadLatest"})
+        self.files = AsyncPrimitiveGroup(transport, {"preflight": "files.preflight", "attach": "files.attach", "download_latest": "files.downloadLatest"})
         self.artifacts = AsyncPrimitiveGroup(transport, {
             "list_latest": "artifacts.listLatest",
             "wait": "artifacts.wait",
