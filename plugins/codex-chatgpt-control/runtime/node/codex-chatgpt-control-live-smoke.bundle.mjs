@@ -430,6 +430,11 @@ var en = {
   },
   /** Extra openers that surface the mode menu but are not selectable modes themselves. */
   modeOpenerExtra: ["Configure"],
+  // --- Thread/action menu rejection (wrong-menu veto for mode selection) ---
+  /** Exact thread/conversation action menu items; a menu containing these is not the mode menu. */
+  threadActionMenuItems: ["Archive", "Copy link", "Delete", "Move to project", "Rename", "Share"],
+  /** Action verbs that prefix a thread title in sidebar menus, e.g. "Pin <thread title>". */
+  threadActionPrefixes: ["Pin", "Unpin"],
   // --- Tool menu items, keyed by logical tool id ---
   tools: {
     web_search: ["Web search"],
@@ -2325,6 +2330,8 @@ var nonToolKeys = [
   "imageContainerHint",
   "modeLabels",
   "modeOpenerExtra",
+  "threadActionMenuItems",
+  "threadActionPrefixes",
   "signedInMarkers",
   "transientAssistant",
   "stopControl",
@@ -2970,16 +2977,36 @@ function getTabId(page) {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
+function clipboardReadCommandsForPlatform(platform, env = {}) {
+  if (platform === "darwin") {
+    return [{ command: "pbpaste", args: [] }];
+  }
+  if (platform === "win32") {
+    return [{ command: "powershell.exe", args: ["-NoProfile", "-Command", "Get-Clipboard -Raw"] }];
+  }
+  if (platform === "linux") {
+    const waylandCommand = { command: "wl-paste", args: ["--no-newline"] };
+    const x11Commands = [
+      { command: "xclip", args: ["-selection", "clipboard", "-o"] },
+      { command: "xsel", args: ["--clipboard", "--output"] }
+    ];
+    const isWayland = typeof env.WAYLAND_DISPLAY === "string" && env.WAYLAND_DISPLAY.length > 0;
+    return isWayland ? [waylandCommand, ...x11Commands] : [...x11Commands, waylandCommand];
+  }
+  return [];
+}
 async function readSystemClipboard() {
-  if (typeof process === "undefined" || process.platform !== "darwin") {
+  if (typeof process === "undefined") {
     return void 0;
   }
-  try {
-    const { stdout } = await execFileAsync("pbpaste", [], { timeout: 2e3, maxBuffer: 10 * 1024 * 1024 });
-    return stdout;
-  } catch {
-    return void 0;
+  for (const { command, args } of clipboardReadCommandsForPlatform(process.platform, process.env)) {
+    try {
+      const { stdout } = await execFileAsync(command, args, { timeout: 2e3, maxBuffer: 10 * 1024 * 1024 });
+      return stdout;
+    } catch {
+    }
   }
+  return void 0;
 }
 async function waitForClipboardChange(before, timeoutMs, pollMs = 150) {
   const started = Date.now();
@@ -4862,6 +4889,105 @@ function generationStateFromText(text) {
   };
 }
 
+// src/dom/wait-snapshot.ts
+function waitTextMetadata(rawText) {
+  const normalized = normalizeWhitespace(rawText ?? "");
+  return {
+    length: normalized.length,
+    hash: fnv1a32Hex(normalized),
+    transient: isTransientAssistantText(normalized)
+  };
+}
+function fnv1a32Hex(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+async function readWaitDomSnapshot(page) {
+  if (typeof page.evaluate !== "function") {
+    return void 0;
+  }
+  return page.evaluate((args) => {
+    const __combinedWaitSnapshot = true;
+    void __combinedWaitSnapshot;
+    const normalizeWs = (value) => value.replace(/\s+/g, " ").trim();
+    const normalizeLower = (value) => (value ?? "").trim().toLowerCase();
+    const nodes = Array.from(document.querySelectorAll("[data-message-author-role]"));
+    const assistantNodes = nodes.filter((node) => node.getAttribute("data-message-author-role") === "assistant");
+    const latestAssistant = assistantNodes.at(-1);
+    const latestAssistantTurnIndex = latestAssistant === void 0 ? void 0 : nodes.indexOf(latestAssistant) + 1;
+    const normalizedText = normalizeWs(latestAssistant?.innerText ?? latestAssistant?.textContent ?? "");
+    let hash = 2166136261;
+    for (let index = 0; index < normalizedText.length; index += 1) {
+      hash ^= normalizedText.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    const textHash = (hash >>> 0).toString(16).padStart(8, "0");
+    const trimmedForTransient = normalizedText.replace(/[.。…]+$/g, "").trim().toLowerCase();
+    const transient = args.transient.some((phrase) => trimmedForTransient === phrase.toLowerCase()) || /^analyzing (?:the )?images?$/.test(trimmedForTransient) || /^processing (?:the )?images?$/.test(trimmedForTransient) || /^reading (?:the )?images?$/.test(trimmedForTransient);
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true";
+    };
+    const visibleButtons = Array.from(document.querySelectorAll("button")).filter((button) => isVisible(button) && button.disabled !== true && button.getAttribute("aria-disabled") !== "true");
+    const buttonTexts = visibleButtons.map((button) => [
+      button.innerText,
+      button.textContent,
+      button.getAttribute("aria-label"),
+      button.getAttribute("title")
+    ].map(normalizeLower).filter(Boolean).join(" ")).filter(Boolean);
+    const bodyText = normalizeLower(document.body?.innerText);
+    const haystacks = [bodyText, ...buttonTexts];
+    const matchingSignals = (phrases) => haystacks.flatMap(
+      (text) => phrases.map((phrase) => phrase.toLowerCase()).filter((phrase) => text.includes(phrase))
+    );
+    const activeSignals = matchingSignals(args.stop);
+    const stoppedSignals = matchingSignals(args.stopped);
+    const generation = {
+      active: activeSignals.length > 0,
+      stopped: stoppedSignals.length > 0,
+      signals: [.../* @__PURE__ */ new Set([...activeSignals, ...stoppedSignals, ...buttonTexts.filter((text) => /stop|cancel|stopped|answering|thinking/i.test(text))])].slice(0, 5)
+    };
+    const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
+    let hasResponseActions;
+    if (turns.length === 0) {
+      hasResponseActions = void 0;
+    } else {
+      const latestTurn = [...turns].reverse().find(
+        (turn) => turn.querySelector("[data-message-author-role='assistant']") !== null
+      );
+      if (latestTurn === void 0) {
+        hasResponseActions = false;
+      } else {
+        const actionText = Array.from(latestTurn.querySelectorAll("button")).map((button) => [
+          button.innerText,
+          button.textContent,
+          button.getAttribute("aria-label"),
+          button.getAttribute("title")
+        ].filter(Boolean).join(" ")).join(" ").toLowerCase();
+        hasResponseActions = args.actions.some((phrase) => actionText.includes(phrase.toLowerCase()));
+      }
+    }
+    const snapshot = {
+      turnCount: nodes.length,
+      assistantTurnCount: assistantNodes.length,
+      text: { length: normalizedText.length, hash: textHash, transient },
+      generation
+    };
+    if (latestAssistantTurnIndex !== void 0) snapshot.latestAssistantTurnIndex = latestAssistantTurnIndex;
+    if (hasResponseActions !== void 0) snapshot.hasResponseActions = hasResponseActions;
+    return snapshot;
+  }, {
+    transient: [...localeLabels.transientAssistant],
+    stop: [...localeLabels.stopControl],
+    stopped: [...localeLabels.stoppedAssistant],
+    actions: [...localeLabels.responseActions]
+  });
+}
+
 // src/commands/deadline.ts
 function createDeadline(timeoutMs, startedAtMs = Date.now()) {
   const safeTimeoutMs = Math.max(0, timeoutMs);
@@ -5174,7 +5300,14 @@ async function readVisibleTextForSubmit(page) {
   if (typeof page.evaluate !== "function") {
     return void 0;
   }
-  return page.evaluate(() => document.body?.innerText ?? "");
+  return page.evaluate(() => {
+    const composerForm = document.querySelector("main form") ?? document.querySelector("form");
+    const scopedText = composerForm?.innerText;
+    if (scopedText !== void 0 && scopedText.trim().length > 0) {
+      return scopedText;
+    }
+    return document.body?.innerText ?? "";
+  });
 }
 async function sendTimeoutWarnings(page) {
   const state = await readSendButtonState(page).catch(() => void 0);
@@ -5207,75 +5340,101 @@ async function waitForMessage(env, args = {}) {
   const deadline = createDeadline(timeoutMs, started);
   const probeTimeoutMs = Math.max(50, Math.min(1e3, Math.max(pollMs, Math.floor(timeoutMs / 4))));
   const waitWarnings = /* @__PURE__ */ new Set();
-  const assistantProgressProbe = createSingleFlightProbe("assistant progress", readAssistantProgressSnapshot);
+  const waitSnapshotProbe = createSingleFlightProbe("wait snapshot", readWaitDomSnapshot);
   const pageStateProbe = createSingleFlightProbe("page state", readPageState);
-  const generationStateProbe = createSingleFlightProbe("assistant generation state", readAssistantGenerationState);
-  const responseActionsProbe = createSingleFlightProbe("assistant response actions", latestAssistantTurnHasResponseActions);
-  let lastTargetText = "";
+  const PAGE_STATE_POLL_STRIDE = 4;
+  let pollIndex = 0;
+  let lastTargetKey = "";
   let lastChangedAt = Date.now();
+  let lastObservedTextLength = 0;
   let latestAssistantCount = await countPageMessages(page, "assistant").catch(() => 0);
   while (Date.now() - started < timeoutMs) {
-    const progressResult = await assistantProgressProbe(page, deadline, { timeoutMs: probeTimeoutMs });
-    addWarnings(waitWarnings, progressResult.warnings);
-    const progress = await progressSnapshotFromProbeResult(page, progressResult, latestAssistantCount);
-    latestAssistantCount = progress.assistantTurnCount;
-    const targetReached = waitTargetReached(args, progress);
-    const latestText = targetReached ? normalizeWhitespace(progress.latestText ?? "") : "";
-    if (latestText !== lastTargetText) {
-      lastTargetText = latestText;
+    const probeResult = await waitSnapshotProbe(page, deadline, { timeoutMs: probeTimeoutMs });
+    addWarnings(waitWarnings, probeResult.warnings);
+    const snapshot = await waitSnapshotFromProbeResult(page, probeResult, latestAssistantCount);
+    latestAssistantCount = snapshot.assistantTurnCount;
+    const targetReached = waitTargetReached(args, snapshot);
+    const targetKey = targetReached && snapshot.text.length > 0 ? `${snapshot.text.length}:${snapshot.text.hash}` : "";
+    if (targetKey !== lastTargetKey) {
+      lastTargetKey = targetKey;
       lastChangedAt = Date.now();
     }
-    const state = await pageStateFromProbe(pageStateProbe(page, deadline, { timeoutMs: probeTimeoutMs }), waitWarnings);
-    if (state?.blocker !== void 0 && state.blocker.kind !== "modal") {
-      return {
-        ok: false,
-        status: "blocked",
-        warnings: [...waitWarnings],
-        blocker: state.blocker,
-        context: await contextFromPage(page)
-      };
+    if (targetReached && snapshot.text.length > 0) {
+      lastObservedTextLength = snapshot.text.length;
     }
-    const snapshot = {
-      latestText,
-      stableMs,
-      textStableForMs: Date.now() - lastChangedAt,
-      generation: await generationStateFromProbe(generationStateProbe(page, deadline, { timeoutMs: probeTimeoutMs }), waitWarnings),
-      hasResponseActions: await responseActionsFromProbe(responseActionsProbe(page, deadline, { timeoutMs: probeTimeoutMs }), waitWarnings)
-    };
-    if (targetReached && snapshot.generation.stopped && latestText.length > 0) {
-      const data = waitDataFromText(args, false, latestText, latestAssistantCount, Date.now() - started);
+    if (pollIndex % PAGE_STATE_POLL_STRIDE === 0) {
+      const state = await pageStateFromProbe(pageStateProbe(page, deadline, { timeoutMs: probeTimeoutMs }), waitWarnings);
+      if (state?.blocker !== void 0 && state.blocker.kind !== "modal") {
+        return {
+          ok: false,
+          status: "blocked",
+          warnings: [...waitWarnings],
+          blocker: state.blocker,
+          context: await contextFromPage(page)
+        };
+      }
+    }
+    pollIndex += 1;
+    const hasResponseActions = await resolveResponseActions(page, snapshot);
+    if (targetReached && snapshot.generation.stopped && snapshot.text.length > 0) {
+      const stoppedText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
+      const data = stoppedText.length > 0 ? waitDataFromText(args, false, stoppedText, latestAssistantCount, Date.now() - started) : waitDataWithoutText(latestAssistantCount, Date.now() - started);
+      if (stoppedText.length === 0) {
+        waitWarnings.add(`The interrupted assistant text (~${snapshot.text.length} chars observed) could not be re-read at wait exit; call messages.readLatest on the same thread to capture it.`);
+      }
       return withCommandOutputText({
         ok: false,
         status: "partial",
         data,
         warnings: [
           ...waitWarnings,
-          ...responseContentWarnings(args, false),
+          ...stoppedText.length > 0 ? responseContentWarnings(args, false) : [],
           "ChatGPT generation appears to have been stopped or interrupted before completion.",
           ...snapshot.generation.signals.map((signal) => `Generation state signal: ${signal}`)
         ],
         context: await contextFromPage(page)
       });
     }
-    if (targetReached && isResponseComplete(snapshot)) {
-      const data = waitDataFromText(args, true, latestText, latestAssistantCount, Date.now() - started);
-      return withCommandOutputText(resultOk(
-        data,
-        await contextFromPage(page),
-        [...waitWarnings, ...responseContentWarnings(args, true)]
-      ));
+    const metadataComplete = targetReached && snapshot.text.length > 0 && !snapshot.text.transient && Date.now() - lastChangedAt >= stableMs && !snapshot.generation.active && !snapshot.generation.stopped && hasResponseActions;
+    if (metadataComplete) {
+      const latestText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
+      const fetchedMetadata = waitTextMetadata(latestText);
+      const completionSnapshot = {
+        latestText,
+        stableMs,
+        textStableForMs: Date.now() - lastChangedAt,
+        generation: snapshot.generation,
+        hasResponseActions
+      };
+      if (fetchedMetadata.hash === snapshot.text.hash && isResponseComplete(completionSnapshot)) {
+        const data = waitDataFromText(args, true, latestText, latestAssistantCount, Date.now() - started);
+        return withCommandOutputText(resultOk(
+          data,
+          await contextFromPage(page),
+          [...waitWarnings, ...responseContentWarnings(args, true)]
+        ));
+      }
+      if (latestText.length > 0) {
+        lastTargetKey = `${fetchedMetadata.length}:${fetchedMetadata.hash}`;
+        lastChangedAt = Date.now();
+        lastObservedTextLength = fetchedMetadata.length;
+      }
     }
     await sleep(page, pollMs);
   }
-  if (lastTargetText.length > 0) {
-    const data = waitDataFromText(args, false, lastTargetText, latestAssistantCount, Date.now() - started);
-    return withCommandOutputText({
-      ok: false,
-      status: "partial",
-      data,
-      warnings: [...waitWarnings, ...responseContentWarnings(args, false), "Timed out after receiving partial assistant text."],
-      context: await contextFromPage(page)
-    });
+  if (lastObservedTextLength > 0) {
+    const partialText = await fetchLatestAssistantText(page);
+    if (partialText !== void 0 && normalizeWhitespace(partialText).length > 0) {
+      const data = waitDataFromText(args, false, normalizeWhitespace(partialText), latestAssistantCount, Date.now() - started);
+      return withCommandOutputText({
+        ok: false,
+        status: "partial",
+        data,
+        warnings: [...waitWarnings, ...responseContentWarnings(args, false), "Timed out after receiving partial assistant text."],
+        context: await contextFromPage(page)
+      });
+    }
+    waitWarnings.add(`Partial assistant text (${lastObservedTextLength} chars) was observed during polling but could not be re-read at wait exit.`);
   }
   return {
     ok: false,
@@ -5288,6 +5447,63 @@ async function waitForMessage(env, args = {}) {
     },
     context: await contextFromPage(page)
   };
+}
+async function fetchLatestAssistantText(page) {
+  const first = await readLatestMessageText(page, "assistant").catch(() => void 0);
+  if (first !== void 0) {
+    return first;
+  }
+  await sleep(page, 150);
+  return readLatestMessageText(page, "assistant").catch(() => void 0);
+}
+function waitDataWithoutText(assistantTurnCount, elapsedMs) {
+  return { complete: false, assistantTurnCount, elapsedMs };
+}
+async function resolveResponseActions(page, snapshot) {
+  if (snapshot.hasResponseActions !== void 0) {
+    return snapshot.hasResponseActions;
+  }
+  try {
+    const copyButtons = copyResponseButtons(page);
+    const count = await copyButtons.count?.();
+    if (count !== void 0) {
+      return count > 0;
+    }
+    return await copyButtons.isVisible?.() === true;
+  } catch {
+    return false;
+  }
+}
+async function waitSnapshotFromProbeResult(page, result, previousAssistantTurnCount) {
+  if (result.ok && result.value !== void 0) {
+    return result.value;
+  }
+  if (!result.ok && (result.timedOut === true || result.skipped === true)) {
+    return {
+      turnCount: 0,
+      assistantTurnCount: previousAssistantTurnCount,
+      text: waitTextMetadata(""),
+      generation: EMPTY_GENERATION_STATE,
+      hasResponseActions: false
+    };
+  }
+  return fallbackWaitSnapshot(page, previousAssistantTurnCount);
+}
+async function fallbackWaitSnapshot(page, previousAssistantTurnCount) {
+  const progress = await fallbackAssistantProgressSnapshot(page, previousAssistantTurnCount);
+  const generation = await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE);
+  const hasResponseActions = await latestAssistantTurnHasResponseActions(page).catch(() => false);
+  const snapshot = {
+    turnCount: progress.turnCount ?? 0,
+    assistantTurnCount: progress.assistantTurnCount,
+    text: waitTextMetadata(progress.latestText),
+    generation,
+    hasResponseActions
+  };
+  if (progress.latestAssistantTurnIndex !== void 0) {
+    snapshot.latestAssistantTurnIndex = progress.latestAssistantTurnIndex;
+  }
+  return snapshot;
 }
 function waitDataFromText(args, complete, responseText, assistantTurnCount, elapsedMs) {
   const data = {
@@ -5314,25 +5530,6 @@ async function pageStateFromProbe(probe, warnings) {
   const result = await probe;
   addWarnings(warnings, result.warnings);
   return result.ok ? result.value : void 0;
-}
-async function progressSnapshotFromProbeResult(page, result, previousAssistantTurnCount) {
-  if (result.ok) {
-    return result.value;
-  }
-  if (result.timedOut === true || result.skipped === true) {
-    return { assistantTurnCount: previousAssistantTurnCount };
-  }
-  return fallbackAssistantProgressSnapshot(page, previousAssistantTurnCount);
-}
-async function generationStateFromProbe(probe, warnings) {
-  const result = await probe;
-  addWarnings(warnings, result.warnings);
-  return result.ok ? result.value : EMPTY_GENERATION_STATE;
-}
-async function responseActionsFromProbe(probe, warnings) {
-  const result = await probe;
-  addWarnings(warnings, result.warnings);
-  return result.ok ? result.value : false;
 }
 function addWarnings(target, warnings) {
   for (const warning of warnings) {
@@ -5580,25 +5777,6 @@ ${language}
 ` : "\n").replace(/~~~[ \t]*([a-z0-9_+#.-]+)?/gi, (_match, language) => language && preserveFenceLanguage ? `
 ${language}
 ` : "\n").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/_([^_]+)_/g, "$1");
-}
-async function readAssistantProgressSnapshot(page) {
-  if (typeof page.evaluate === "function") {
-    return page.evaluate(() => {
-      const nodes = Array.from(document.querySelectorAll("[data-message-author-role]"));
-      const assistantNodes = nodes.filter((node) => node.getAttribute("data-message-author-role") === "assistant");
-      const latestAssistant = assistantNodes.at(-1);
-      const latestAssistantTurnIndex = latestAssistant === void 0 ? void 0 : nodes.indexOf(latestAssistant) + 1;
-      const snapshot = {
-        turnCount: nodes.length,
-        assistantTurnCount: assistantNodes.length
-      };
-      const latestText = latestAssistant?.innerText ?? latestAssistant?.textContent ?? void 0;
-      if (latestText !== void 0) snapshot.latestText = latestText;
-      if (latestAssistantTurnIndex !== void 0) snapshot.latestAssistantTurnIndex = latestAssistantTurnIndex;
-      return snapshot;
-    });
-  }
-  return fallbackAssistantProgressSnapshot(page, 0);
 }
 async function fallbackAssistantProgressSnapshot(page, previousAssistantTurnCount) {
   const messages = await readMessages(page, { format: "normalized_text" }).catch(() => void 0);
@@ -7613,7 +7791,10 @@ async function enumerateVisibleMenuItems(page) {
         if (ariaLabel !== null) item.ariaLabel = ariaLabel;
         return item;
       };
-      const roleItems = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']")).map(toItem).filter((item) => item.label.length > 0);
+      const allRoleNodes = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']"));
+      const containers = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter((container) => typeof container.contains === "function");
+      const scopedRoleNodes = containers.length > 0 ? allRoleNodes.filter((node) => containers.some((container) => container.contains(node))) : allRoleNodes;
+      const roleItems = (scopedRoleNodes.length > 0 ? scopedRoleNodes : allRoleNodes).map(toItem).filter((item) => item.label.length > 0);
       if (roleItems.length > 0) {
         return { items: roleItems, labels: [], split: false };
       }
@@ -7670,14 +7851,8 @@ var MODE_ID_ALIASES = {
   extraHigh: ["extra high", "extra-high", "extra_high", "extrahigh"],
   pro: ["pro"]
 };
-var THREAD_ACTION_MENU_LABELS = /* @__PURE__ */ new Set([
-  "archive",
-  "copy link",
-  "delete",
-  "move to project",
-  "rename",
-  "share"
-]);
+var THREAD_ACTION_MENU_LABELS = new Set(localeLabels.threadActionMenuItems.map(normalizeForLabelMatch));
+var THREAD_ACTION_PREFIXES = localeLabels.threadActionPrefixes.map(normalizeForLabelMatch).filter((prefix) => prefix.length > 0);
 async function setMode(env, args) {
   const boot2 = await ensurePage6(env);
   if (!boot2.ok) {
@@ -7740,7 +7915,42 @@ async function setMode(env, args) {
       }
       selected.push(versionResult.selected);
     }
-    return resultOk({ selected, candidates: candidateLabels }, await contextFromPage(page));
+    const verificationWarnings = await modeVerificationWarnings(page, requested, selected);
+    return resultOk({ selected, candidates: candidateLabels }, await contextFromPage(page), verificationWarnings);
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+async function modeVerificationWarnings(page, requested, selected) {
+  if (requested.length === 0) {
+    return [];
+  }
+  await page.waitForTimeout?.(250);
+  const visibleButtons = await visibleModeButtonLabelList(page);
+  if (visibleButtons.length === 0) {
+    return [
+      `Mode selection is unverified: no mode-labelled composer control was visible after selecting ${selected.map((label) => JSON.stringify(label)).join(", ")}. Use modes.get or inspect modeStep before treating this as a verified mode.`
+    ];
+  }
+  const unverified = requested.filter((request) => findUniqueVisibleLabelForRequest(visibleButtons, request) === void 0);
+  if (unverified.length === 0) {
+    return [];
+  }
+  return [
+    `Mode selection is unverified: requested ${unverified.map((request) => JSON.stringify(request.requested)).join(", ")} is not reflected by the visible mode controls (${visibleButtons.join(", ")}). Use modes.get or inspect modeStep before treating this as a verified mode.`
+  ];
+}
+async function getMode(env, args = {}) {
+  void args;
+  const boot2 = await ensurePage6(env);
+  if (!boot2.ok) {
+    return boot2;
+  }
+  const page = env.page;
+  try {
+    const modes = await visibleModeButtonLabelList(page);
+    const warnings = modes.length === 0 ? ["No mode-labelled composer control is currently visible, so the active ChatGPT mode could not be read."] : [];
+    return resultOk({ modes }, await contextFromPage(page), warnings);
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
@@ -7755,7 +7965,7 @@ async function waitForModeMenu(page, requested, timeoutMs) {
       return { opened: false, alreadySelected, modeButtons };
     }
     const openMenuItems = await enumerateVisibleMenuItems(page);
-    if (looksLikeModeMenu(openMenuItems.map((item) => item.label))) {
+    if (looksLikeModeMenu(openMenuItems)) {
       return { opened: true, alreadySelected: [], modeButtons };
     }
     if (await clickModeOpener(page, modeButtons)) {
@@ -7835,32 +8045,46 @@ async function clickModeOpener(page, modeButtons) {
   }
   return clickFirstUniqueButton(page, MODE_OPENER_LABELS);
 }
-function looksLikeModeMenu(labels) {
-  return labels.some((label) => {
-    const normalized = normalizeLabel(label);
-    return CURRENT_MODE_LABELS.some((modeLabel) => visibleLabelMatches(normalized, normalizeLabel(modeLabel)));
+function isThreadActionLabel(label) {
+  const normalized = normalizeForLabelMatch(label);
+  if (THREAD_ACTION_MENU_LABELS.has(normalized)) {
+    return true;
+  }
+  return THREAD_ACTION_PREFIXES.some((prefix) => normalized.startsWith(`${prefix} `));
+}
+function hasStructuralModeEvidence(item) {
+  if (item.testId?.startsWith("model-switcher-") === true) {
+    return true;
+  }
+  return MODEL_VERSION_FAMILY_PATTERN.test(item.label) || MODEL_VERSION_LABEL_PATTERN.test(item.label);
+}
+function isModeMenuEvidence(item) {
+  if (hasStructuralModeEvidence(item)) {
+    return true;
+  }
+  if (isThreadActionLabel(item.label)) {
+    return false;
+  }
+  const normalized = normalizeForLabelMatch(item.label);
+  return CURRENT_MODE_LABELS.some((modeLabel) => {
+    const normalizedMode = normalizeForLabelMatch(modeLabel);
+    if (normalized === normalizedMode) {
+      return true;
+    }
+    return !isShortLatinToken(normalizedMode) && visibleLabelMatches(normalized, normalizedMode);
   });
+}
+function looksLikeModeMenu(items) {
+  return items.some((item) => isModeMenuEvidence(item));
 }
 function shouldRejectAsWrongModeMenu(items) {
   if (items.length === 0) {
     return false;
   }
-  const hasPositiveModeEvidence = items.some((item) => {
-    if (item.testId?.startsWith("model-switcher-") === true) {
-      return true;
-    }
-    if (MODEL_VERSION_FAMILY_PATTERN.test(item.label) || MODEL_VERSION_LABEL_PATTERN.test(item.label)) {
-      return true;
-    }
-    if (item.role === "menuitemradio" && CURRENT_MODE_LABELS.some((label) => visibleLabelMatches(item.label, label))) {
-      return true;
-    }
-    return CURRENT_MODE_LABELS.some((label) => visibleLabelMatches(item.label, label));
-  });
-  if (hasPositiveModeEvidence) {
+  if (items.some((item) => isModeMenuEvidence(item))) {
     return false;
   }
-  return items.some((item) => THREAD_ACTION_MENU_LABELS.has(normalizeForLabelMatch(item.label)));
+  return items.some((item) => isThreadActionLabel(item.label));
 }
 async function clickMenuItem(page, label) {
   if (await clickModelSwitcherMenuItem(page, label)) {
@@ -7949,20 +8173,37 @@ function toolLabels(tool) {
   return known !== void 0 ? [...known] : [tool];
 }
 function findModeMenuItem(candidates, request) {
+  const selectable = candidates.filter((candidate) => !isThreadActionLabel(candidate.label));
   for (const wanted of request.labels) {
-    const exact = findUniqueMenuItem(candidates, wanted);
-    if (exact !== void 0) {
-      return exact;
+    const match = findUniqueModeMenuItem(selectable, wanted);
+    if (match !== void 0) {
+      return match;
     }
   }
   const wantedIndex = request.modeId === void 0 ? void 0 : CANONICAL_INTELLIGENCE_ORDER.get(request.modeId);
   if (wantedIndex === void 0) {
     return void 0;
   }
-  const intelligenceItems = candidates.filter(
+  const intelligenceItems = selectable.filter(
     (candidate) => candidate.role === "menuitemradio" && !MODEL_VERSION_LABEL_PATTERN.test(candidate.label) && !MODEL_VERSION_FAMILY_PATTERN.test(candidate.label)
   );
   return intelligenceItems.length >= CANONICAL_INTELLIGENCE_ORDER.size ? intelligenceItems[wantedIndex] : void 0;
+}
+function findUniqueModeMenuItem(items, wanted) {
+  const normalizedWanted = normalizeForLabelMatch(wanted);
+  const exact = items.filter((item) => normalizeForLabelMatch(item.label) === normalizedWanted);
+  if (exact.length === 1) {
+    return exact[0];
+  }
+  const fuzzy = items.filter((item) => visibleLabelMatches(item.label, wanted));
+  if (fuzzy.length !== 1) {
+    return void 0;
+  }
+  const match = fuzzy[0];
+  if (!isShortLatinToken(normalizedWanted)) {
+    return match;
+  }
+  return hasStructuralModeEvidence(match) || match.role === "menuitemradio" ? match : void 0;
 }
 function requestedModeSelections(args) {
   const requested = [args.model, args.intelligence, args.effort].filter((value) => value !== void 0);
@@ -8027,7 +8268,7 @@ function findUniqueVisibleLabelForRequest(labels, request) {
 }
 async function selectModelVersion(page, requestedVersion, currentCandidates, timeoutMs) {
   let candidates = await enumerateVisibleMenuItems(page);
-  if (!looksLikeModeMenu(candidates.map((candidate) => candidate.label))) {
+  if (!looksLikeModeMenu(candidates)) {
     const opened2 = await waitForModeMenu(page, [{ requested: requestedVersion, labels: [requestedVersion] }], timeoutMs);
     if (opened2.opened) {
       await page.waitForTimeout?.(250);
@@ -8856,7 +9097,7 @@ async function createRunReport(env, result, options = {}) {
     }, options);
     const report2 = {
       schemaVersion: 1,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      createdAt,
       includeContent,
       summary,
       steps: result.steps?.map((step) => ({
@@ -8963,6 +9204,7 @@ var commandRisk = {
   "projects.sources.add": "medium",
   "response.copy": "medium",
   "modes.set": "medium",
+  "modes.get": "low",
   "tools.select": "medium",
   "threads.delete": "high",
   "threads.archive": "high",
@@ -9059,6 +9301,7 @@ var descriptors = [
   primitive("projects.sources.add", "Append explicit local files to a visible ChatGPT Project Sources list after confirmMutation: true.", 18e4),
   primitive("response.copy", "Click Copy response and return clipboard Markdown, with DOM fallback.", 5e3),
   primitive("modes.set", "Select a visible model, intelligence, effort, or nested model-version candidate when unambiguous.", 3e4),
+  primitive("modes.get", "Read the mode labels shown on the visible composer controls without changing them.", 3e4),
   primitive("tools.select", "Select a visible ChatGPT tool when unambiguous.", 3e4)
 ];
 function commandDescriptors() {
@@ -9233,6 +9476,11 @@ function primitiveArgs(name) {
       timeoutMs: "optional timeout for opening and selecting the visible mode menu"
     };
   }
+  if (name === "modes.get") {
+    return {
+      timeoutMs: "optional timeout for attaching to the ChatGPT page"
+    };
+  }
   return {};
 }
 function primitiveExamples(name) {
@@ -9242,6 +9490,12 @@ function primitiveExamples(name) {
       `await chatgpt.modes.set({ intelligence: "Pro", modelVersion: "5.4" });`,
       `await chatgpt.modes.set({ effort: "Thinking" });`,
       `await chatgpt.askWithFiles({ mode: { model: "Pro" }, files: ["/absolute/host/path.jpg"], prompt: "Describe this image.", wait: true });`
+    ];
+  }
+  if (name === "modes.get") {
+    return [
+      `await chatgpt.modes.get();`,
+      `// Verify an expensive Pro consult before submitting: const current = await chatgpt.modes.get();`
     ];
   }
   if (name === "files.preflight") {
@@ -9828,7 +10082,8 @@ function createChatGPT(options = {}) {
       downloadLatest: (args) => downloadLatestArtifact(env, args)
     },
     modes: {
-      set: (args) => setMode(env, args)
+      set: (args) => setMode(env, args),
+      get: (args) => getMode(env, args)
     },
     tools: {
       select: (args) => selectTool(env, args)
