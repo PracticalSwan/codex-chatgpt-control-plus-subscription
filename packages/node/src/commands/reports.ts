@@ -56,7 +56,7 @@ export async function createRunReport(
     }, options);
     const report = {
       schemaVersion: 1,
-      createdAt: new Date().toISOString(),
+      createdAt,
       includeContent,
       summary,
       steps: result.steps?.map(step => ({
