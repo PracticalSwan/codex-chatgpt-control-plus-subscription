@@ -1,12 +1,12 @@
 [project]
 name = "codex-chatgpt-control"
-version = "0.3.0a1"
+version = "0.3.0a2"
 description = "Python SDK for Codex agents controlling visible ChatGPT web sessions through a local backend."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-  { name = "Adam Allcock" }
+  { name = "PracticalSwan" }
 ]
 keywords = ["codex", "chatgpt", "browser-automation", "visible-ui", "agents", "sdk"]
 classifiers = [
@@ -27,9 +27,9 @@ dependencies = [
 chatgpt-thread = "codex_chatgpt_control.thread_entrypoint:main"
 
 [project.urls]
-Homepage = "https://github.com/adamallcock/codex-chatgpt-control"
-Issues = "https://github.com/adamallcock/codex-chatgpt-control/issues"
-Source = "https://github.com/adamallcock/codex-chatgpt-control"
+Homepage = "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription"
+Issues = "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/issues"
+Source = "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription"
 
 [project.optional-dependencies]
 dev = [

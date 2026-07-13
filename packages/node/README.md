@@ -4,11 +4,18 @@ TypeScript runtime for Codex agents controlling visible ChatGPT web sessions thr
 
 Unofficial project: not affiliated with, endorsed by, or sponsored by OpenAI. This is not an OpenAI API wrapper and does not call hidden or private ChatGPT endpoints. Browser-required calls need a visible session and should fail with a clear machine-readable reason when the bridge is unavailable.
 
-## Install
+## Install From This Fork
 
 ```bash
-npm install codex-chatgpt-control
+git clone https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription.git
+cd codex-chatgpt-control-plus-subscription/packages/node
+npm ci
+npm run build
 ```
+
+The GPT-5.6 Sol High Intelligence consultation workflow is shipped through the
+repository's Codex plugin. The upstream npm package does not install this
+fork's focused workflow.
 
 ## Usage
 

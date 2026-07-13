@@ -52,8 +52,8 @@ workflow selector.
 
 Two rules that never change regardless of language:
 
-- **API keys stay English.** Callers pass `model: "Pro"`,
-  `intelligence: "Pro"`, `modelVersion: "5.4"`, `effort: "Thinking"`, or
+- **API keys stay English.** Callers pass `model: "GPT-5.6 Sol"`,
+  `intelligence: "High"`, `modelVersion: "5.6"`, `effort: "Thinking"`, or
   `tool: "web_search"`. Only the *matched DOM text* is localized. You add the
   German label to the registry array; the caller-facing key is untouched.
 - **Structural anchors are language-agnostic and are not in this file.** Element ids

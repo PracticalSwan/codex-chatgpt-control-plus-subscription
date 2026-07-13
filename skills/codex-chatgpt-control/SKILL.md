@@ -19,6 +19,22 @@ This skill is for visible, user-directed ChatGPT workflows only. It is not an Op
 6. Redact run reports by default. Raw prompt/response content is opt-in only.
 7. Attach only files the user approved.
 
+## Focused GPT-5.6 Sol High Consultations
+
+Use the plugin's `chatgpt-gpt-5-6-high-consult` skill for deep planning,
+research, logical reasoning, reviews, naming, positioning, brainstorming,
+design critique, or a second opinion. It uses the visible ChatGPT Plus session
+with GPT-5.6 Sol at High Intelligence and never falls back to Pro.
+
+Keep both workflows in the single `codex-chatgpt-control` plugin; do not
+install or package the focused consultation skill as a separate plugin.
+
+The focused skill submits once with `messages.compose` and `messages.submit`,
+saves the exact thread URL and pre-submit turn baselines, then polls with
+metadata and reads the response. After a polling or browser-runtime timeout,
+reconnect to that same thread and recover by polling or reading; never
+resubmit the prompt.
+
 ## Runtime Requirements
 
 Deterministic local checks need:
@@ -205,7 +221,12 @@ const latest = await chatgpt.messages.waitAndRead({
 
 Use `format: "normalized_text"` only for compact assertions, polling checks, or simple exact-string smoke tests.
 
-For long Pro, Thinking, Deep Research, or file-backed answers, poll with `chatgpt.messages.wait({ responseContent: "metadata", ... })` so repeated partial polls return status metadata instead of re-emitting the growing answer body. Call `readLatest({ format: "markdown" })` once the wait confirms completion.
+For long GPT-5.6 Sol High, Thinking, Deep Research, or file-backed answers,
+poll with `chatgpt.messages.wait({ responseContent: "metadata", ... })` so
+repeated partial polls return status metadata instead of re-emitting the growing
+answer body. Call `readLatest({ format: "markdown" })` once the wait confirms
+completion. If the browser runtime resets, reopen the saved thread URL and
+recover without resubmitting the prompt.
 
 ## Python Client
 

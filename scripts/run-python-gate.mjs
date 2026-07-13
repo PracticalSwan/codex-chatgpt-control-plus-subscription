@@ -20,7 +20,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
     stdio: "inherit",
-    shell: false,
+    shell: process.platform === "win32" && command.toLowerCase().endsWith(".cmd"),
     env: process.env
   });
   if (result.status !== 0) {
@@ -34,7 +34,7 @@ function ensureVenv() {
 }
 
 if (gate === "test") {
-  run(npmCommand, ["--prefix", nodeRoot, "run", "bundle:backend"]);
+  run(npmCommand, ["run", "bundle:backend"], { cwd: nodeRoot });
   ensureVenv();
   run(venvPython, ["-m", "unittest", "discover", "-s", "tests"], { cwd: pythonRoot });
 } else if (gate === "compile") {
@@ -44,7 +44,7 @@ if (gate === "test") {
   ensureVenv();
   run(venvPython, ["-m", "pyright", "--pythonpath", venvPython, "src", "tests"], { cwd: pythonRoot });
 } else if (gate === "ordinary-shell") {
-  run(npmCommand, ["--prefix", nodeRoot, "run", "bundle:backend"]);
+  run(npmCommand, ["run", "bundle:backend"], { cwd: nodeRoot });
   ensureVenv();
   run(venvPython, ["scripts/live_smoke.py", "--mode", "ordinary-shell"], { cwd: pythonRoot });
 } else {

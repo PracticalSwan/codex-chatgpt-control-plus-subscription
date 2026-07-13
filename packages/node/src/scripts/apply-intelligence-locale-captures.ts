@@ -26,7 +26,7 @@ const ENGLISH_INTELLIGENCE_MODE_OPTIONS: Record<IntelligenceModeOptionId, string
   extraHigh: "Extra High",
   pro: "Pro",
 };
-const UPDATE_NOTE = " * Intelligence picker labels updated 2026-06-10 from a visible ChatGPT Pro session.";
+const UPDATE_NOTE = " * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.";
 
 class ApplyUsageError extends Error {
   constructor(message: string, readonly exitCode = 2) {

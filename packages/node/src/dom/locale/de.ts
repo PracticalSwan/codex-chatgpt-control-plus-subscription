@@ -9,7 +9,7 @@ import type { LocaleContribution } from "./types.js";
  * `download`, `downloadImage`, `imageContainerHint`, `transientAssistant`, `stopControl`,
  * and the login/captcha/rate-limit blocker copy.
  *
- * Intelligence picker labels updated 2026-06-10 from a visible ChatGPT Pro session.
+ * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
  */
 export const de = {
   composerTextbox: ["Mit ChatGPT chatten"],

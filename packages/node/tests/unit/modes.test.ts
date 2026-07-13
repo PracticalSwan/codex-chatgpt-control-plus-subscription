@@ -95,6 +95,21 @@ describe("mode and tool selection blockers", () => {
     });
   });
 
+  it("selects GPT-5.6 Sol and High when both visible choices are unambiguous", async () => {
+    const page = menuPage(["GPT-5.6 Sol", "High"], ["GPT-5.6 Sol", "High"]);
+
+    const result = await setMode({ page }, {
+      model: "GPT-5.6 Sol",
+      intelligence: "High"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      selected: ["GPT-5.6 Sol", "High"],
+      candidates: ["GPT-5.6 Sol", "High"]
+    });
+  });
+
   it("selects a nested model version from the new intelligence picker", async () => {
     const page = intelligencePickerPage({ current: "High" });
 

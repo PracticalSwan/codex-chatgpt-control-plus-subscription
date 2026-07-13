@@ -7,7 +7,7 @@ import type { LocaleContribution } from "./types.js";
  * Uses distinctly Québécois vocabulary: "clavardage" for chat, "requête" for prompt.
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-06-10 from a visible ChatGPT Pro session.
+ * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
  */
 export const frCA = {
   composerTextbox: ["Converser avec ChatGPT"],

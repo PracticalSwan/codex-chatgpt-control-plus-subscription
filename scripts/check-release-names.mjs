@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 
 const npmPackage = "codex-chatgpt-control";
 const pypiPackage = "codex-chatgpt-control";
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 async function readNodeVersion() {
   const pkg = JSON.parse(await readFile(new URL("../packages/node/package.json", import.meta.url), "utf8"));
@@ -23,8 +24,9 @@ async function readPythonVersion() {
 
 async function npmView(spec) {
   try {
-    const { stdout } = await execFileAsync("npm", ["view", spec, "name", "version", "--json"], {
-      maxBuffer: 1024 * 1024
+    const { stdout } = await execFileAsync(npmCommand, ["view", spec, "name", "version", "--json"], {
+      maxBuffer: 1024 * 1024,
+      shell: process.platform === "win32"
     });
     return { exists: true, data: JSON.parse(stdout) };
   } catch (error) {

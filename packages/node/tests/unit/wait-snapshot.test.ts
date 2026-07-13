@@ -52,6 +52,19 @@ describe("wait snapshot metadata", () => {
     expect(snapshot?.generation.active).toBe(false);
   });
 
+  it("does not mistake assistant prose for a generation control", async () => {
+    const page = domBackedPage({
+      assistantText: "Use Cancel only when the requested work must stop.",
+      actionButtonText: "Copy response",
+      bodyText: "New chat Chat with ChatGPT Use Cancel only when the requested work must stop."
+    });
+
+    const snapshot = await readWaitDomSnapshot(page);
+
+    expect(snapshot?.generation.active).toBe(false);
+    expect(snapshot?.generation.stopped).toBe(false);
+  });
+
   it("returns undefined response actions when no conversation turn markers exist", async () => {
     const page = domBackedPage({
       assistantText: "Answer without turn testids",
@@ -92,11 +105,13 @@ function domBackedPage({
   assistantText,
   stopButtonText,
   actionButtonText,
+  bodyText = "New chat Chat with ChatGPT",
   includeTurnMarkers = true
 }: {
   assistantText: string;
   stopButtonText?: string;
   actionButtonText?: string;
+  bodyText?: string;
   includeTurnMarkers?: boolean;
 }): PageLike {
   const userNode = fakeMessageNode("user", "The question");
@@ -118,7 +133,7 @@ function domBackedPage({
       const previousWindow = globalThis.window;
       try {
         globalThis.document = {
-          body: { innerText: "New chat Chat with ChatGPT" },
+          body: { innerText: bodyText },
           querySelectorAll: (selector: string) => {
             if (selector === "[data-message-author-role]") {
               return [userNode, assistantNode];

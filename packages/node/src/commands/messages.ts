@@ -359,7 +359,10 @@ export async function waitForMessage(
   const pollMs = args.pollMs ?? 750;
   const started = Date.now();
   const deadline = createDeadline(timeoutMs, started);
-  const probeTimeoutMs = Math.max(50, Math.min(1000, Math.max(pollMs, Math.floor(timeoutMs / 4))));
+  // Leave enough time for a real browser snapshot, while still bounding one
+  // probe well below the overall wait window. A timed-out single-flight probe
+  // may still finish in the browser, so the next poll must not overlap it.
+  const probeTimeoutMs = Math.max(250, Math.min(2_500, Math.max(pollMs * 2, Math.floor(timeoutMs / 8))));
   const waitWarnings = new Set<string>();
   // One combined DOM probe per poll: counts, latest-text metadata, generation state, and
   // response actions come back in a single evaluate, sampled from the same DOM instant.
@@ -377,6 +380,13 @@ export async function waitForMessage(
   while (Date.now() - started < timeoutMs) {
     const probeResult = await waitSnapshotProbe(page, deadline, { timeoutMs: probeTimeoutMs });
     addWarnings(waitWarnings, probeResult.warnings);
+    // Do not convert a skipped or timed-out single-flight snapshot into an
+    // empty response. Doing so resets the stability timer and can turn a
+    // completed long response into a false partial/timeout result.
+    if (!probeResult.ok && (probeResult.timedOut === true || probeResult.skipped === true)) {
+      await sleep(page, pollMs);
+      continue;
+    }
     const snapshot = await waitSnapshotFromProbeResult(page, probeResult, latestAssistantCount);
     latestAssistantCount = snapshot.assistantTurnCount;
     const targetReached = waitTargetReached(args, snapshot);

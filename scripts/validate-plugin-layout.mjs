@@ -104,11 +104,22 @@ async function main() {
     path.join(pluginRoot, "runtime/node/codex-chatgpt-control-backend.mjs"),
     path.join(pluginRoot, "runtime/node/codex-chatgpt-control-live-smoke.bundle.mjs"),
     path.join(pluginRoot, "skills/codex-chatgpt-control/SKILL.md"),
-    path.join(pluginRoot, "skills/chatgpt-pro-consult/SKILL.md")
+    path.join(pluginRoot, "skills/chatgpt-gpt-5-6-high-consult/SKILL.md")
   ];
   for (const file of requiredFiles) {
     assert(existsSync(file), `Missing required plugin file: ${path.relative(root, file)}`);
   }
+
+  const expectedSkillDirectories = ["chatgpt-gpt-5-6-high-consult", "codex-chatgpt-control"];
+  const skillDirectories = (await readdir(path.join(pluginRoot, "skills"), { withFileTypes: true }))
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .sort();
+  assert(
+    skillDirectories.length === expectedSkillDirectories.length
+      && skillDirectories.every((name, index) => name === expectedSkillDirectories[index]),
+    `Plugin must expose exactly these bundled skills: ${expectedSkillDirectories.join(", ")}`
+  );
 
   const marketplace = await readJson(marketplacePath);
   assert(marketplace.name === "codex-chatgpt-control", "Marketplace name must be codex-chatgpt-control");
@@ -128,12 +139,12 @@ async function main() {
   await assertReferencedAsset(pluginRoot, manifest.interface?.composerIcon, "Plugin composerIcon", 64);
 
   const broadSkill = await readFile(path.join(pluginRoot, "skills/codex-chatgpt-control/SKILL.md"), "utf8");
-  const proSkill = await readFile(path.join(pluginRoot, "skills/chatgpt-pro-consult/SKILL.md"), "utf8");
+  const consultSkill = await readFile(path.join(pluginRoot, "skills/chatgpt-gpt-5-6-high-consult/SKILL.md"), "utf8");
   assert(broadSkill.includes("name: codex-chatgpt-control"), "Broad skill frontmatter missing name");
-  assert(proSkill.includes("name: chatgpt-pro-consult"), "Pro skill frontmatter missing name");
+  assert(consultSkill.includes("name: chatgpt-gpt-5-6-high-consult"), "GPT-5.6 Sol High skill frontmatter missing name");
   assert(broadSkill.includes("../../runtime/import-chatgpt-control.mjs"), "Broad skill must use plugin runtime loader");
-  assert(proSkill.includes("../../runtime/import-chatgpt-control.mjs"), "Pro skill must use plugin runtime loader");
-  assert(!proSkill.includes("~/.codex/skills/"), "Pro skill must not depend on an installed skill runtime");
+  assert(consultSkill.includes("../../runtime/import-chatgpt-control.mjs"), "GPT-5.6 Sol High skill must use plugin runtime loader");
+  assert(!consultSkill.includes("~/.codex/skills/"), "GPT-5.6 Sol High skill must not depend on an installed skill runtime");
 
   const pluginFiles = await listTextFiles(pluginRoot);
   for (const file of pluginFiles) {

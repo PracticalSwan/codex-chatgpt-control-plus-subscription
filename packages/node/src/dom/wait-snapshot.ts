@@ -113,8 +113,9 @@ export async function readWaitDomSnapshot(page: PageLike): Promise<WaitDomSnapsh
         button.getAttribute("title")
       ].map(normalizeLower).filter(Boolean).join(" "))
       .filter(Boolean);
-    const bodyText = normalizeLower(document.body?.innerText);
-    const haystacks = [bodyText, ...buttonTexts];
+    // Generation state comes only from visible controls. Answer text may use
+    // "cancel" or "stop" without indicating that ChatGPT is still generating.
+    const haystacks = buttonTexts;
     const matchingSignals = (phrases: string[]) => haystacks.flatMap(text =>
       phrases
         .map(phrase => phrase.toLowerCase())

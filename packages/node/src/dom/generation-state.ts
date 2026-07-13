@@ -43,8 +43,10 @@ export async function readAssistantGenerationState(page: PageLike): Promise<Assi
           button.getAttribute("title")
         ].map(normalize).filter(Boolean).join(" "))
         .filter(Boolean);
-      const bodyText = normalize(document.body?.innerText);
-      const haystacks = [bodyText, ...buttonTexts];
+      // Only live controls signal generation. Assistant prose can legitimately
+      // contain words such as "cancel" or "stop" and must not keep polling in
+      // a false generating state.
+      const haystacks = buttonTexts;
       const matchingSignals = (phrases: string[]) => haystacks.flatMap(text =>
         phrases
           .map(phrase => phrase.toLowerCase())

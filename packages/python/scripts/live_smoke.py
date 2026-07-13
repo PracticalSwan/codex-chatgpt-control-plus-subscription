@@ -343,11 +343,47 @@ def resolve_backend_command(backend_command: str | None) -> tuple[list[str], str
 def split_backend_command(command: str) -> list[str]:
     # On POSIX, shlex's default handling is correct. On Windows, POSIX mode
     # eats backslashes (mangling "C:\\node.exe" into "C:node.exe"), so split in
-    # non-POSIX mode and strip the surrounding quotes that mode leaves behind so
-    # quoted paths with spaces (e.g. "C:\\Program Files\\nodejs\\node.exe") work.
+    # non-POSIX mode and strip the surrounding quotes that mode leaves behind.
+    # Then recombine unquoted, existing paths: Python's own executable and an
+    # explicit backend script may both be supplied as absolute Windows paths
+    # containing spaces by a test harness or caller.
     if sys.platform != "win32":
         return shlex.split(command)
-    return [strip_matching_quotes(token) for token in shlex.split(command, posix=False)]
+    tokens = [strip_matching_quotes(token) for token in shlex.split(command, posix=False)]
+    return recombine_existing_windows_paths(tokens)
+
+
+def recombine_existing_windows_paths(tokens: list[str]) -> list[str]:
+    """Join adjacent unquoted tokens only when their joined text is a real file.
+
+    Windows permits paths with spaces, but callers sometimes provide an
+    unquoted command string such as ``C:\\Program Files\\Python\\python.exe
+    C:\\work dir\\backend.py``. ``shlex`` cannot infer those boundaries by
+    itself. Existing filesystem paths provide a narrow, deterministic signal
+    without changing commands whose executable or arguments do not exist yet.
+    """
+
+    resolved: list[str] = []
+    index = 0
+    while index < len(tokens):
+        candidate = tokens[index]
+        longest_existing: tuple[str, int] | None = None
+        for end in range(index, len(tokens)):
+            if end > index:
+                candidate = f"{candidate} {tokens[end]}"
+            if Path(candidate).is_file():
+                longest_existing = (candidate, end)
+
+        if longest_existing is None:
+            resolved.append(tokens[index])
+            index += 1
+            continue
+
+        value, end = longest_existing
+        resolved.append(value)
+        index = end + 1
+
+    return resolved
 
 
 def strip_matching_quotes(token: str) -> str:

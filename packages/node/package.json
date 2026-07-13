@@ -1,17 +1,17 @@
 {
   "name": "codex-chatgpt-control",
-  "version": "0.3.0-alpha.1",
+  "version": "0.3.0-alpha.2",
   "description": "Unofficial SDK for Codex agents controlling visible ChatGPT web sessions.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adamallcock/codex-chatgpt-control.git",
+    "url": "git+https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription.git",
     "directory": "packages/node"
   },
-  "homepage": "https://github.com/adamallcock/codex-chatgpt-control#readme",
+  "homepage": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription#readme",
   "bugs": {
-    "url": "https://github.com/adamallcock/codex-chatgpt-control/issues"
+    "url": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/issues"
   },
   "keywords": [
     "codex",

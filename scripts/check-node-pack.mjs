@@ -25,11 +25,14 @@ const FORBIDDEN_PATTERNS = [
   /__pycache__/
 ];
 
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
 function main() {
-  const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+  const output = execFileSync(npmCommand, ["pack", "--dry-run", "--json"], {
     cwd: new URL("../packages/node", import.meta.url),
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32"
   });
 
   const packs = JSON.parse(output);

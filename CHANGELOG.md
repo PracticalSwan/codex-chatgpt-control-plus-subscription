@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0-alpha.2
+
+- Replaces the focused Pro consultation skill with
+  `chatgpt-gpt-5-6-high-consult`, targeting visible ChatGPT Plus sessions with
+  GPT-5.6 Sol at High Intelligence and no Pro fallback.
+- Documents primitive-only submission, bounded metadata polling, and exact
+  thread recovery after polling or browser-runtime timeouts without prompt
+  resubmission.
+- Prevents assistant prose containing stop/cancel words from being interpreted
+  as a live generation control, and skips timed-out single-flight snapshot
+  polls without resetting response stability.
+- Makes plugin runtime builds work from Windows by invoking `npm.cmd`.
+
 ## 0.3.0-alpha.1
 
 - Hardens visible mode selection against thread/sidebar action menus: short mode words such as `Pro` no longer match inside pinned-thread titles, localized thread-action labels and `Pin`/`Unpin` prefixes are rejected, and menu enumeration is scoped to open menu containers.

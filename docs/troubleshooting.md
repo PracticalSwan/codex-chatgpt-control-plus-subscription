@@ -54,6 +54,15 @@ Then rerun the Python smoke from `packages/python`.
 
 Treat selector drift as a product-change blocker. Capture the smallest public-safe reproduction and update selectors/tests together.
 
+## GPT-5.6 Sol High Consultation Recovery
+
+Focused consultations submit exactly once. Save the submitted thread URL and
+the pre-submit total and assistant turn counts. If polling or the browser
+kernel times out, reconnect to the same visible thread, then use bounded
+`messages.wait(...)` and `messages.readLatest(...)` recovery. Never submit the
+prompt again; only report a captured answer when the valid read shows both
+turn counts advanced beyond the saved baselines.
+
 ## Doctor Preflight
 
 Run `doctor({ check: ["bridge", "login", "upload"] })` before long workflows when browser state or permissions are uncertain. Use opt-in checks such as `existing_tab`, `artifacts`, `file_preflight`, `localization`, and `reports` before targeted workflows. The `localization` check verifies registry readiness, not full localized selector coverage. The `file_preflight` check validates supplied local file metadata without opening ChatGPT or attempting upload.

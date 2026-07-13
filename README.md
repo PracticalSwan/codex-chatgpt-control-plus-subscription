@@ -1,8 +1,6 @@
 # codex-chatgpt-control
 
-[![CI](https://img.shields.io/github/actions/workflow/status/adamallcock/codex-chatgpt-control/parity.yml?branch=main&label=CI&logo=github)](https://github.com/adamallcock/codex-chatgpt-control/actions/workflows/parity.yml)
-[![npm](https://img.shields.io/npm/v/codex-chatgpt-control?logo=npm)](https://www.npmjs.com/package/codex-chatgpt-control)
-[![PyPI](https://img.shields.io/pypi/v/codex-chatgpt-control?logo=pypi)](https://pypi.org/project/codex-chatgpt-control/)
+[![CI](https://img.shields.io/github/actions/workflow/status/PracticalSwan/codex-chatgpt-control-plus-subscription/parity.yml?branch=main&label=CI&logo=github)](https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/actions/workflows/parity.yml)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Node](https://img.shields.io/badge/Node-20%2B-green)
@@ -14,11 +12,11 @@ https://github.com/user-attachments/assets/6ca38f2d-6646-490d-8e4d-8a6dc21e926f
 
 ## Why This Exists
 
-This project exists because Codex and ChatGPT are useful in different parts of the same work loop. Codex is the execution environment: it can read and edit the local repo, run commands, test changes, and prepare branches. ChatGPT, meanwhile, may expose different frontier models, Pro-tier reasoning modes, larger context windows, canvases, connectors, browsing/research tools, memory, or company knowledge at any given time.
+This project exists because Codex and ChatGPT are useful in different parts of the same work loop. Codex is the execution environment: it can read and edit the local repo, run commands, test changes, and prepare branches. ChatGPT, meanwhile, may expose different frontier models, larger context windows, canvases, connectors, browsing/research tools, memory, or company knowledge at any given time.
 
 In practice, that means a user can end up doing real work by hand across two surfaces:
 
-> I am flicking between Codex for execution, and ChatGPT with Pro for deep planning, information gathering, consensus building, branding, and research tasks.
+> I am flicking between Codex for execution, and ChatGPT Plus with GPT-5.6 Sol at High Intelligence for deep planning, information gathering, consensus building, branding, and research tasks.
 
 `codex-chatgpt-control` turns that manual tab switch into a structured, visible, user-directed bridge. It lets an agent stay inside Codex while asking ChatGPT web to help with the kinds of work where ChatGPT may currently be the stronger product surface: deep planning, long-context review, research synthesis, naming, positioning, brainstorming, design critique, and second-opinion analysis.
 
@@ -28,6 +26,22 @@ In practice, that means a user can end up doing real work by hand across two sur
 - **Narrow by design:** built for Codex -> browser -> chatgpt.com workflows; it is not a generic browser automation framework, scraping tool, OpenAI API wrapper, or official OpenAI project.
 
 This project is not affiliated with, endorsed by, or sponsored by OpenAI.
+
+## Focused Plus Consultation
+
+The bundled `chatgpt-gpt-5-6-high-consult` skill is the focused consultation
+workflow for this fork. It uses the user's visible ChatGPT Plus session with
+GPT-5.6 Sol at High Intelligence for planning, research, review, naming,
+positioning, brainstorming, design critique, and second opinions.
+
+- It selects GPT-5.6 Sol and High before submission, or uses only the visible
+  High control when duplicate model labels make the user's already-confirmed
+  GPT-5.6 Sol selection unaddressable.
+- It submits a prompt once through the visible UI, then uses bounded metadata
+  polling and a single Markdown read.
+- A polling or browser-runtime timeout resumes the exact submitted thread;
+  the prompt is never resubmitted.
+- It does not select or fall back to Pro.
 
 ## What This Is For
 
@@ -45,21 +59,25 @@ This project deliberately does not provide hidden ChatGPT access, account automa
 
 -----
 
-## Install
+## Install This Fork
 
-Node:
-
-```bash
-npm install codex-chatgpt-control
-```
-
-Python:
+The GPT-5.6 Sol High Intelligence workflow is provided by this source checkout
+and its Codex plugin. It is not published under a separate npm or PyPI package
+name, so installing the upstream registry package does not install this fork's
+behavior.
 
 ```bash
-python -m pip install codex-chatgpt-control
+git clone https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription.git
+cd codex-chatgpt-control-plus-subscription
+npm --prefix packages/node ci
+npm --prefix packages/node run build
+npm --prefix packages/node run bundle
+npm --prefix packages/node run bundle:backend
+python -m pip install -e ./packages/python
 ```
 
-The Node package is the browser-control runtime authority. The Python package is a parity client over the same local backend protocol.
+The Node package is the browser-control runtime authority. The Python package
+is a parity client over the same local backend protocol.
 
 ## Codex Desktop Setup
 
@@ -68,7 +86,7 @@ This repo includes a Codex plugin at [plugins/codex-chatgpt-control](plugins/cod
 Install the repository as a Codex plugin marketplace and add the plugin:
 
 ```bash
-codex plugin marketplace add adamallcock/codex-chatgpt-control --ref main
+codex plugin marketplace add PracticalSwan/codex-chatgpt-control-plus-subscription --ref main
 codex plugin add codex-chatgpt-control@codex-chatgpt-control
 ```
 
@@ -79,28 +97,27 @@ codex plugin marketplace upgrade codex-chatgpt-control
 codex plugin add codex-chatgpt-control@codex-chatgpt-control
 ```
 
-The plugin contains:
+This repository exposes one installable Codex plugin, `codex-chatgpt-control`.
+It contains:
 
 - `codex-chatgpt-control`: the broad visible ChatGPT web workflow and diagnostics skill.
-- `chatgpt-pro-consult`: a focused ChatGPT Pro second-opinion workflow.
+- `chatgpt-gpt-5-6-high-consult`: a focused GPT-5.6 Sol High Intelligence
+  second-opinion workflow for ChatGPT Plus.
 - bundled Node runtime files for bridge-enabled imports.
 
-Manual skill-only install is still available as a fallback at [skills/codex-chatgpt-control/SKILL.md](skills/codex-chatgpt-control/SKILL.md):
-
-```bash
-mkdir -p ~/.codex/skills/codex-chatgpt-control
-rsync -a skills/codex-chatgpt-control/ ~/.codex/skills/codex-chatgpt-control/
-```
+Install this one plugin once; do not install either skill separately or add a
+separate GPT-5.6 Sol High consultation plugin.
 
 Then add a short instruction to any repo where agents should be allowed to consult ChatGPT web:
 
 ```markdown
-When a task would benefit from the visible ChatGPT web product, use the
-codex-chatgpt-control skill and SDK. Keep the workflow visible and
-user-directed. If I say a ChatGPT thread is already open, reuse that tab with
-existingTab/existing_tab instead of opening a replacement. If the browser bridge
-or ChatGPT UI is unavailable, report the SDK stop reason and do not retry
-blindly.
+When a task would materially benefit from a visible ChatGPT consultation, use
+the chatgpt-gpt-5-6-high-consult skill with GPT-5.6 Sol at High Intelligence.
+Keep the workflow visible and user-directed; never select or fall back to Pro.
+Submit once, retain the thread URL and turn baselines, and recover the same
+thread after a polling or browser-runtime timeout without resubmitting. If I
+say a ChatGPT thread is already open, reuse that tab with existingTab/
+existing_tab instead of opening a replacement.
 ```
 
 The plugin and skill are agent-facing operating guides plus local runtime bundles. They do not bundle a browser bridge, credentials, or ChatGPT account access. Real browser workflows still require a compatible Codex/browser bridge and a visible signed-in ChatGPT web session.
@@ -164,18 +181,14 @@ text/thread commands do not automatically replace the user's tab.
 
 ## Python Quick Start
 
-The Python package talks to the Node backend. Build or install a backend command first, then point Python at it:
-
-```bash
-python -m pip install codex-chatgpt-control
-npm install codex-chatgpt-control
-```
+The Python package talks to the local Node backend built from this checkout.
+Run the source installation steps above first, then point Python at that bundle:
 
 ```python
 from codex_chatgpt_control import Agent, BackendClient, Runner, StdioBackendTransport
 
 backend = BackendClient(StdioBackendTransport(
-    command=["npx", "--yes", "--package", "codex-chatgpt-control", "codex-chatgpt-control-backend"]
+    command=["node", "../node/dist/codex-chatgpt-control-backend.mjs"]
 ))
 runner = Runner(backend)
 
@@ -199,16 +212,16 @@ The Python package is a protocol client. The current browser runtime is still No
 
 ## Quick Start From Source
 
-Clone the repo and build the Node runtime:
+Clone the repo and run the deterministic source checks:
 
 ```bash
-git clone https://github.com/adamallcock/codex-chatgpt-control.git
-cd codex-chatgpt-control/packages/node
-npm ci
-npm test
-npm run build
-npm run bundle
-npm run bundle:backend
+git clone https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription.git
+cd codex-chatgpt-control-plus-subscription
+npm --prefix packages/node ci
+npm --prefix packages/node test
+npm --prefix packages/node run build
+npm --prefix packages/node run bundle
+npm --prefix packages/node run bundle:backend
 ```
 
 Use the built source bundle from a Codex/browser-bridge host:
@@ -315,10 +328,13 @@ python scripts/live_smoke.py --mode ordinary-shell
 
 Ordinary-shell smoke checks are expected to return structured browser-bridge blockers for browser-required actions. A real ChatGPT run requires a compatible visible browser session and bridge.
 
-## Package Coordinates
+## Package Identities
 
-- npm package: [`codex-chatgpt-control`](https://www.npmjs.com/package/codex-chatgpt-control)
-- PyPI package: [`codex-chatgpt-control`](https://pypi.org/project/codex-chatgpt-control/)
+This fork retains the original package/import identities for source compatibility,
+but does not claim that the upstream registry packages contain its changes.
+
+- Node package/import: `codex-chatgpt-control`
+- Python package/import: `codex-chatgpt-control` / `codex_chatgpt_control`
 - Node import: `import { createChatGPT } from "codex-chatgpt-control";`
 - Python import: `import codex_chatgpt_control`
 

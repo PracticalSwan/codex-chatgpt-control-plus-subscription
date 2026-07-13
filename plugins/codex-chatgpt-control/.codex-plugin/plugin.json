@@ -1,13 +1,13 @@
 {
   "name": "codex-chatgpt-control",
-  "version": "0.1.0-alpha.1+codex.20260608.1",
-  "description": "Use visible ChatGPT web from Codex for threads, files, Pro review, response capture, and safe blocker reporting.",
+  "version": "0.3.0-alpha.2+codex.20260713.1",
+  "description": "Use visible ChatGPT web from Codex for threads, files, GPT-5.6 Sol High consultation, response capture, and safe blocker reporting.",
   "author": {
-    "name": "Adam Allcock",
-    "url": "https://github.com/adamallcock"
+    "name": "PracticalSwan",
+    "url": "https://github.com/PracticalSwan"
   },
-  "homepage": "https://github.com/adamallcock/codex-chatgpt-control",
-  "repository": "https://github.com/adamallcock/codex-chatgpt-control",
+  "homepage": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription",
+  "repository": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -15,25 +15,27 @@
     "browser",
     "visible-ui",
     "agents",
-    "pro-consult"
+    "plus",
+    "gpt-5-6-sol",
+    "high-intelligence"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "ChatGPT Control for Codex",
-    "shortDescription": "Use visible ChatGPT web from Codex for threads, files, Pro review, response capture, and blockers",
-    "longDescription": "ChatGPT Control for Codex lets Codex agents work with the ChatGPT web product the user can see. It supports user-directed prompts, thread reuse, file attachments, visible downloads, Markdown response capture, redacted reports, Pro consultation workflows, and structured blockers for login, captcha, permissions, selector drift, rate limits, and missing browser bridge state. It does not bypass ChatGPT login, call hidden endpoints, read cookies, or replace the OpenAI API.",
-    "developerName": "Adam Allcock",
+    "shortDescription": "Use visible ChatGPT web from Codex for threads, files, GPT-5.6 Sol High review, response capture, and blockers",
+    "longDescription": "ChatGPT Control for Codex lets Codex agents work with the ChatGPT web product the user can see. It supports user-directed prompts, thread reuse, file attachments, visible downloads, Markdown response capture, redacted reports, GPT-5.6 Sol High Intelligence consultation workflows for ChatGPT Plus, and structured blockers for login, captcha, permissions, selector drift, rate limits, and missing browser bridge state. It does not bypass ChatGPT login, call hidden endpoints, read cookies, or replace the OpenAI API.",
+    "developerName": "PracticalSwan",
     "category": "Developer Tools",
     "capabilities": [
       "Interactive",
       "Read",
       "Write"
     ],
-    "websiteURL": "https://github.com/adamallcock/codex-chatgpt-control",
-    "privacyPolicyURL": "https://github.com/adamallcock/codex-chatgpt-control/blob/main/docs/plugin-privacy.md",
-    "termsOfServiceURL": "https://github.com/adamallcock/codex-chatgpt-control/blob/main/docs/plugin-terms.md",
+    "websiteURL": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription",
+    "privacyPolicyURL": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/blob/main/docs/plugin-privacy.md",
+    "termsOfServiceURL": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/blob/main/docs/plugin-terms.md",
     "defaultPrompt": [
-      "Use ChatGPT Pro to critique this plan.",
+      "Use GPT-5.6 Sol at High Intelligence to critique this plan.",
       "Continue the ChatGPT thread open in Chrome.",
       "Diagnose ChatGPT file upload from Codex."
     ],

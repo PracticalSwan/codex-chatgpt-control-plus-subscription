@@ -115,7 +115,7 @@ Use `readLatest({ format: "markdown" })`, `copyLatest()`, or the default SDK `re
 
 ## Long Responses Return `partial`
 
-Long Pro, Thinking, Deep Research, or file-backed answers can take longer than the default wait window. Treat `status: "partial"` and `data.complete: false` as an incomplete capture even when `output_text` is non-empty. For repeated polling, prefer `messages.wait({ responseContent: "metadata", ... })` so Codex receives compact status metadata instead of the same growing partial answer body. Re-run `messages.wait(...)` on the same thread until completion is confirmed, then call `readLatest(...)` or `copyLatest(...)` once.
+Long GPT-5.6 Sol High, Thinking, Deep Research, or file-backed answers can take longer than the default wait window. Treat `status: "partial"` and `data.complete: false` as an incomplete capture even when `output_text` is non-empty. For repeated polling, prefer `messages.wait({ responseContent: "metadata", ... })` so Codex receives compact status metadata instead of the same growing partial answer body. Re-run `messages.wait(...)` on the same thread until completion is confirmed, then call `readLatest(...)` or `copyLatest(...)` once.
 
 Recommended long-answer wait:
 
@@ -130,6 +130,17 @@ await chatgpt.messages.wait({
 
 const final = await chatgpt.messages.readLatest({ format: "markdown" });
 ```
+
+## Consultation Runtime Timeout Recovery
+
+For a focused GPT-5.6 Sol High consultation, retain the submitted thread URL and
+the pre-submit total and assistant turn counts. If the browser kernel or
+automation runtime resets, reconnect to the visible browser, reopen that exact
+thread, then run another bounded `messages.wait(...)` and
+`messages.readLatest(...)`. Do not compose or submit the prompt again. Treat a
+response as captured only when `read.ok` is true and both turn counts advanced
+beyond the saved baselines.
+
 
 Active generation may appear as a visible or accessible-name control such as `Stop answering`, `Stop generating`, or `Stop streaming`. Stopped generation may appear as `Stopped thinking`. Treat all of those as incomplete states.
 

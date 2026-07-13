@@ -28,6 +28,22 @@
 - Redact prompts, responses, filenames, account identifiers, and local paths in
   reports unless the user explicitly wants a local private artifact.
 
+## Plus Consultation Profile
+
+- Focused consultations MUST use the `chatgpt-gpt-5-6-high-consult` skill and
+  the visible ChatGPT web session with GPT-5.6 Sol at High Intelligence. Do
+  not select or fall back to Pro.
+- The broad control skill and focused consultation skill MUST remain bundled in
+  the single `codex-chatgpt-control` plugin. Do not create or install a
+  separate consultation plugin.
+- Consultations MUST submit once through `messages.compose` and
+  `messages.submit`, retain the submitted thread URL and pre-submit turn
+  baselines, then use bounded `messages.wait` and `messages.readLatest`.
+- After a polling or browser-runtime timeout, reconnect to and reopen that
+  exact thread, then recover by polling or reading it. Never resubmit the
+  prompt; only report a captured response when the read is valid and its turn
+  counts advanced past the baselines.
+
 ## Local Commands
 
 From the repository root:

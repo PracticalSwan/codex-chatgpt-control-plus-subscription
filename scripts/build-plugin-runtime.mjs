@@ -101,7 +101,12 @@ async function main() {
 
   if (!args.skipBuild) {
     for (const script of ["build", "bundle", "bundle:backend", "bundle:live-smoke"]) {
-      execFileSync("npm", ["run", script], { cwd: packageDir, stdio: "inherit" });
+      const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+      execFileSync(npmCommand, ["run", script], {
+        cwd: packageDir,
+        stdio: "inherit",
+        shell: process.platform === "win32"
+      });
     }
   }
 

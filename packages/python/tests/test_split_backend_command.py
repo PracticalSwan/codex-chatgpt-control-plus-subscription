@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,18 @@ class SplitBackendCommandWin32Tests(unittest.TestCase):
     def test_win32_single_unquoted_token(self) -> None:
         result = self._split("node")
         self.assertEqual(result, ["node"])
+
+    def test_win32_recombines_existing_unquoted_paths_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="backend command ") as temporary:
+            root = Path(temporary)
+            executable = root / "runner.py"
+            backend = root / "fake backend.py"
+            executable.touch()
+            backend.touch()
+
+            result = self._split(f"{executable} {backend}")
+
+        self.assertEqual(result, [str(executable), str(backend)])
 
 
 if __name__ == "__main__":

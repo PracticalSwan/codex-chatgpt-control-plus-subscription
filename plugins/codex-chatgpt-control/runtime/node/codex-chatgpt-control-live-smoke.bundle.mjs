@@ -4819,8 +4819,7 @@ async function readAssistantGenerationState(page) {
         button.getAttribute("aria-label"),
         button.getAttribute("title")
       ].map(normalize2).filter(Boolean).join(" ")).filter(Boolean);
-      const bodyText = normalize2(document.body?.innerText);
-      const haystacks = [bodyText, ...buttonTexts];
+      const haystacks = buttonTexts;
       const matchingSignals = (phrases) => haystacks.flatMap(
         (text) => phrases.map((phrase) => phrase.toLowerCase()).filter((phrase) => text.includes(phrase))
       );
@@ -4939,8 +4938,7 @@ async function readWaitDomSnapshot(page) {
       button.getAttribute("aria-label"),
       button.getAttribute("title")
     ].map(normalizeLower).filter(Boolean).join(" ")).filter(Boolean);
-    const bodyText = normalizeLower(document.body?.innerText);
-    const haystacks = [bodyText, ...buttonTexts];
+    const haystacks = buttonTexts;
     const matchingSignals = (phrases) => haystacks.flatMap(
       (text) => phrases.map((phrase) => phrase.toLowerCase()).filter((phrase) => text.includes(phrase))
     );
@@ -5338,7 +5336,7 @@ async function waitForMessage(env, args = {}) {
   const pollMs = args.pollMs ?? 750;
   const started = Date.now();
   const deadline = createDeadline(timeoutMs, started);
-  const probeTimeoutMs = Math.max(50, Math.min(1e3, Math.max(pollMs, Math.floor(timeoutMs / 4))));
+  const probeTimeoutMs = Math.max(250, Math.min(2500, Math.max(pollMs * 2, Math.floor(timeoutMs / 8))));
   const waitWarnings = /* @__PURE__ */ new Set();
   const waitSnapshotProbe = createSingleFlightProbe("wait snapshot", readWaitDomSnapshot);
   const pageStateProbe = createSingleFlightProbe("page state", readPageState);
@@ -5351,6 +5349,10 @@ async function waitForMessage(env, args = {}) {
   while (Date.now() - started < timeoutMs) {
     const probeResult = await waitSnapshotProbe(page, deadline, { timeoutMs: probeTimeoutMs });
     addWarnings(waitWarnings, probeResult.warnings);
+    if (!probeResult.ok && (probeResult.timedOut === true || probeResult.skipped === true)) {
+      await sleep(page, pollMs);
+      continue;
+    }
     const snapshot = await waitSnapshotFromProbeResult(page, probeResult, latestAssistantCount);
     latestAssistantCount = snapshot.assistantTurnCount;
     const targetReached = waitTargetReached(args, snapshot);
@@ -9226,7 +9228,7 @@ var descriptors = [
     `await chatgpt.askInThread({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, prompt: "Continue." });`
   ]),
   workflow("askWithFiles", "Attach absolute local file paths, optionally set mode, ask, wait, and read.", [
-    `await chatgpt.askWithFiles({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, mode: { model: "Pro" }, files: ["/absolute/host/path/brief.md"], prompt: "Summarize this.", wait: true, read: { format: "markdown" } });`
+    `await chatgpt.askWithFiles({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, mode: { model: "GPT-5.6 Sol", intelligence: "High" }, files: ["/absolute/host/path/brief.md"], prompt: "Summarize this.", wait: true, read: { format: "markdown" } });`
   ]),
   workflow("askAndDownload", "Ask ChatGPT to produce a visible downloadable output and save the latest exposed file.", [
     `await chatgpt.askAndDownload({ prompt: "Create a CSV.", download: { destDir: "/absolute/host/output" }, wait: true });`
@@ -9406,7 +9408,7 @@ function workflowArgs(name) {
       prompt: "message to send after files are attached",
       thread: "optional thread selector",
       existingTab: "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
-      mode: 'optional visible mode selection, e.g. { model: "Pro" } or { intelligence: "Pro", modelVersion: "5.4" }',
+      mode: 'optional visible mode selection, e.g. { model: "GPT-5.6 Sol", intelligence: "High" }',
       wait: "true or wait options; defaults to true",
       read: 'true or read options such as { format: "markdown" }; defaults to Markdown',
       report: "optional redacted report settings"
@@ -9469,8 +9471,8 @@ function primitiveArgs(name) {
   if (name === "modes.set") {
     return {
       effort: "visible legacy effort label such as Thinking or Extended",
-      intelligence: "visible intelligence label such as Medium, High, Extra High, or Pro",
-      model: "visible model label such as Pro, GPT-5.5, or another available model",
+      intelligence: "visible intelligence label such as High or another available level",
+      model: "visible model label such as GPT-5.6 Sol or another available model",
       modelVersion: "visible nested model version such as 5.5, 5.4, 4.5, or o3",
       version: "alias for modelVersion",
       timeoutMs: "optional timeout for opening and selecting the visible mode menu"
@@ -9486,16 +9488,15 @@ function primitiveArgs(name) {
 function primitiveExamples(name) {
   if (name === "modes.set") {
     return [
-      `await chatgpt.modes.set({ model: "Pro" });`,
-      `await chatgpt.modes.set({ intelligence: "Pro", modelVersion: "5.4" });`,
+      `await chatgpt.modes.set({ model: "GPT-5.6 Sol", intelligence: "High" });`,
       `await chatgpt.modes.set({ effort: "Thinking" });`,
-      `await chatgpt.askWithFiles({ mode: { model: "Pro" }, files: ["/absolute/host/path.jpg"], prompt: "Describe this image.", wait: true });`
+      `await chatgpt.askWithFiles({ mode: { model: "GPT-5.6 Sol", intelligence: "High" }, files: ["/absolute/host/path.jpg"], prompt: "Describe this image.", wait: true });`
     ];
   }
   if (name === "modes.get") {
     return [
       `await chatgpt.modes.get();`,
-      `// Verify an expensive Pro consult before submitting: const current = await chatgpt.modes.get();`
+      `// Verify a GPT-5.6 Sol High consult before submitting: const current = await chatgpt.modes.get();`
     ];
   }
   if (name === "files.preflight") {

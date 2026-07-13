@@ -7,12 +7,14 @@ status: draft
 
 # Release Process
 
-## Source Alpha
+## Fork Source Of Truth
 
-1. Keep the private repository as the source of truth and publish only from the
-   generated public repository.
-2. Run deterministic Node and Python parity gates.
-3. Build and validate the Codex plugin runtime:
+This repository is the source of truth for the Plus workflow. Use normal,
+reviewable changes in this repository; do not depend on a private-source export
+or generated public mirror.
+
+1. Run deterministic Node and Python parity gates.
+2. Build and validate the Codex plugin runtime:
 
    ```bash
    npm run plugin:build
@@ -20,54 +22,9 @@ status: draft
    npm run plugin:validate
    ```
 
-4. Verify no live reports, thread URLs, credentials, or local paths are committed.
-
-## Public Mirror Regeneration
-
-The public repository is generated from the private source tree. Regenerate it
-from the private repository and land changes through a public pull request so
-contributors can review the public-facing history.
-
-1. In the private repository, confirm source changes are merged and clean.
-2. Rebuild plugin runtime bundles before export when runtime code changed:
-
-   ```bash
-   node tools/public-export/root/scripts/build-plugin-runtime.mjs --root .
-   node tools/public-export/root/scripts/check-plugin-runtime.mjs --root .
-   ```
-
-3. Run the exporter check:
-
-   ```bash
-   # From the private repository root.
-   node tools/public-export/export-public.mjs --check
-   ```
-
-4. Generate into a public branch, not public `main`:
-
-   ```bash
-   git switch -c codex/public-export-<topic>
-   node /path/to/private/tools/public-export/export-public.mjs --write
-   ```
-
-5. Split the generated public diff into public-readable commits. Prefer
-   feature groups such as runtime behavior, localization, diagnostics,
-   contracts, docs, and plugin runtime bundles. Avoid one opaque `chore`
-   commit when public contributors cannot see the private source commits.
-6. Validate the public branch:
-
-   ```bash
-   # From the generated public checkout.
-   npm run node:build
-   npm run python:compile
-   npm run node:contracts
-   npm run plugin:validate
-   npm run node:bundle
-   npm run plugin:check
-   ```
-
-7. Open a public PR with a self-contained summary and merge with a normal merge
-   commit when the split commit stack should remain visible.
+3. Verify no live reports, thread URLs, credentials, or local paths are
+   committed.
+4. Review `git diff --check` and the final diff before opening a pull request.
 
 ## Codex Plugin Alpha
 
@@ -75,7 +32,9 @@ contributors can review the public-facing history.
 2. Confirm the plugin manifest is present at `plugins/codex-chatgpt-control/.codex-plugin/plugin.json`.
 3. Confirm the plugin exposes exactly two V1 skills:
    - `codex-chatgpt-control`
-   - `chatgpt-pro-consult`
+   - `chatgpt-gpt-5-6-high-consult`
+   These skills must remain bundled in this one plugin; do not add a separate
+   consultation plugin or marketplace entry.
 4. Install locally from the checkout:
 
    ```bash
@@ -94,18 +53,26 @@ contributors can review the public-facing history.
 
 ## Trusted Publishing
 
-npm and PyPI releases are published from `.github/workflows/release.yml` using
-GitHub Actions OIDC trusted publishing. Do not store npm or PyPI API tokens in
-GitHub secrets for this workflow.
+When a fork-owned registry release is intentionally made, npm and PyPI releases
+are published from `.github/workflows/release.yml` using GitHub Actions OIDC
+trusted publishing. Do not store npm or PyPI API tokens in GitHub secrets for
+this workflow.
 
 The registry-side trusted publisher configuration must match the public
 repository exactly:
 
-- Repository: `adamallcock/codex-chatgpt-control`
+- Repository: `PracticalSwan/codex-chatgpt-control-plus-subscription`
 - Workflow filename: `release.yml`
 - Environment: `release`
 - npm package: `codex-chatgpt-control`
 - PyPI project: `codex-chatgpt-control`
+
+This fork currently retains the original package names for source
+compatibility. Before enabling publication, confirm that the publisher owns
+both registry names; otherwise choose fork-owned names and update manifests,
+imports, commands, documentation, and release checks together. Until then,
+install the source checkout or Codex plugin rather than assuming a registry
+package contains the Plus workflow.
 
 The `release` GitHub environment should require human approval. That keeps tag
 creation reversible until the protected publish jobs start, while still making
@@ -113,8 +80,8 @@ the package upload itself reproducible and tokenless.
 
 ## Release Tag Flow
 
-1. Merge the generated public PR after required public checks pass.
-2. Confirm versions and registry availability on public `main`:
+1. Merge the reviewed pull request after required checks pass.
+2. Confirm versions and registry availability on `main`:
 
    ```bash
    npm run release:check-version
