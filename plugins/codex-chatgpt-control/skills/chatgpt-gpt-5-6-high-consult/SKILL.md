@@ -35,20 +35,19 @@ Select GPT-5.6 Sol with High Intelligence before submitting:
 const mode = { model: "GPT-5.6 Sol", intelligence: "High" };
 ```
 
-Inspect the `modes.set` result. If the model or High cannot be selected, stop
-and report its structured blocker and visible candidates; do not substitute a
-different model or intelligence level.
+Inspect the `modes.set` result. It must succeed and report that both the
+`GPT-5.6 Sol` model row and the `High` intelligence row were selected. The
+current ChatGPT Plus picker may collapse that pair into a single visible
+composer control labelled `High` after selection. When the selection result
+contains `GPT-5.6 Sol` and `High` is the visible active control, treat that as
+verified `GPT-5.6 Sol` at High Intelligence; do not block merely because the
+model name is no longer echoed as a second composer button.
 
-If duplicate exact `GPT-5.6 Sol` labels make the model unaddressable and the
-user explicitly confirmed that the visible ChatGPT tab is already set to
-GPT-5.6 Sol, preserve that model and set only:
-
-```js
-const mode = { intelligence: "High" };
-```
-
-Report that this is a user-confirmed model selection rather than an independent
-SDK read.
+The visible picker candidates should include both `GPT-5.6 Sol` and `High` (or
+their normalized/localized equivalents). Stop and report the structured
+blocker if `modes.set` fails, either requested row cannot be selected, or the
+candidate evidence does not contain both parts of the requested mode. Never
+substitute another model or intelligence level, and never fall back to Pro.
 
 ## Runtime Loader
 

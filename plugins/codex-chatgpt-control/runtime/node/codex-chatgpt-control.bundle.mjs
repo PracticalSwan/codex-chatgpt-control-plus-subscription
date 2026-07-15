@@ -7873,13 +7873,13 @@ async function setMode(env, args) {
       }
       selected.push(versionResult.selected);
     }
-    const verificationWarnings = await modeVerificationWarnings(page, requested, selected);
+    const verificationWarnings = await modeVerificationWarnings(page, requested, selected, candidateLabels);
     return resultOk({ selected, candidates: candidateLabels }, await contextFromPage(page), verificationWarnings);
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
 }
-async function modeVerificationWarnings(page, requested, selected) {
+async function modeVerificationWarnings(page, requested, selected, candidates) {
   if (requested.length === 0) {
     return [];
   }
@@ -7890,13 +7890,29 @@ async function modeVerificationWarnings(page, requested, selected) {
       `Mode selection is unverified: no mode-labelled composer control was visible after selecting ${selected.map((label) => JSON.stringify(label)).join(", ")}. Use modes.get or inspect modeStep before treating this as a verified mode.`
     ];
   }
-  const unverified = requested.filter((request) => findUniqueVisibleLabelForRequest(visibleButtons, request) === void 0);
+  const unverified = requested.filter(
+    (request) => findUniqueVisibleLabelForRequest(visibleButtons, request) === void 0 && !isImplicitSolHighVerification(request, requested, selected, visibleButtons, candidates)
+  );
   if (unverified.length === 0) {
     return [];
   }
   return [
     `Mode selection is unverified: requested ${unverified.map((request) => JSON.stringify(request.requested)).join(", ")} is not reflected by the visible mode controls (${visibleButtons.join(", ")}). Use modes.get or inspect modeStep before treating this as a verified mode.`
   ];
+}
+function isImplicitSolHighVerification(request, requested, selected, visibleButtons, candidates) {
+  if (normalizeModeLookupKey(request.requested) !== normalizeModeLookupKey("GPT-5.6 Sol")) {
+    return false;
+  }
+  const highRequest = requested.find((item) => item.modeId === "high");
+  if (highRequest === void 0) {
+    return false;
+  }
+  const selectedModel = findUniqueVisibleLabel(selected, request.requested) !== void 0;
+  const candidateModel = findUniqueVisibleLabel(candidates, request.requested) !== void 0;
+  const candidateHigh = findUniqueVisibleLabelForRequest(candidates, highRequest) !== void 0;
+  const visibleHigh = findUniqueVisibleLabelForRequest(visibleButtons, highRequest) !== void 0;
+  return selectedModel && candidateModel && candidateHigh && visibleHigh;
 }
 async function getMode(env, args = {}) {
   void args;

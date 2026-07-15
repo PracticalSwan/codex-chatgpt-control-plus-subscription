@@ -110,6 +110,26 @@ describe("mode and tool selection blockers", () => {
     });
   });
 
+  it("treats the visible High control as GPT-5.6 Sol High after both rows were selected", async () => {
+    const page = modeButtonMenuPage(
+      [{ text: "High" }],
+      ["Instant 5.5", "Medium", "High", "GPT-5.6 Sol"],
+      {}
+    );
+
+    const result = await setMode({ page }, {
+      model: "GPT-5.6 Sol",
+      intelligence: "High"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual([]);
+    expect(result.data).toEqual({
+      selected: ["GPT-5.6 Sol", "High"],
+      candidates: ["Instant 5.5", "Medium", "High", "GPT-5.6 Sol"]
+    });
+  });
+
   it("selects a nested model version from the new intelligence picker", async () => {
     const page = intelligencePickerPage({ current: "High" });
 

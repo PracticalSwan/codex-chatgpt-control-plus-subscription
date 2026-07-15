@@ -125,7 +125,7 @@ export async function setMode(
       selected.push(versionResult.selected);
     }
 
-    const verificationWarnings = await modeVerificationWarnings(page, requested, selected);
+    const verificationWarnings = await modeVerificationWarnings(page, requested, selected, candidateLabels);
     return resultOk({ selected, candidates: candidateLabels }, await contextFromPage(page), verificationWarnings);
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
@@ -143,7 +143,8 @@ export async function setMode(
 async function modeVerificationWarnings(
   page: PageLike,
   requested: RequestedMode[],
-  selected: string[]
+  selected: string[],
+  candidates: string[]
 ): Promise<string[]> {
   if (requested.length === 0) {
     return [];
@@ -157,13 +158,46 @@ async function modeVerificationWarnings(
     ];
   }
 
-  const unverified = requested.filter(request => findUniqueVisibleLabelForRequest(visibleButtons, request) === undefined);
+  const unverified = requested.filter(request =>
+    findUniqueVisibleLabelForRequest(visibleButtons, request) === undefined
+    && !isImplicitSolHighVerification(request, requested, selected, visibleButtons, candidates)
+  );
   if (unverified.length === 0) {
     return [];
   }
   return [
     `Mode selection is unverified: requested ${unverified.map(request => JSON.stringify(request.requested)).join(", ")} is not reflected by the visible mode controls (${visibleButtons.join(", ")}). Use modes.get or inspect modeStep before treating this as a verified mode.`
   ];
+}
+
+/**
+ * ChatGPT's current Plus picker exposes GPT-5.6 Sol as a model row while the
+ * composer keeps only the selected High intelligence control visible. Once
+ * both rows were selected successfully, High is the active GPT-5.6 Sol High
+ * control; requiring the model name to remain a second composer button is a
+ * false negative.
+ */
+function isImplicitSolHighVerification(
+  request: RequestedMode,
+  requested: RequestedMode[],
+  selected: string[],
+  visibleButtons: string[],
+  candidates: string[]
+): boolean {
+  if (normalizeModeLookupKey(request.requested) !== normalizeModeLookupKey("GPT-5.6 Sol")) {
+    return false;
+  }
+
+  const highRequest = requested.find(item => item.modeId === "high");
+  if (highRequest === undefined) {
+    return false;
+  }
+
+  const selectedModel = findUniqueVisibleLabel(selected, request.requested) !== undefined;
+  const candidateModel = findUniqueVisibleLabel(candidates, request.requested) !== undefined;
+  const candidateHigh = findUniqueVisibleLabelForRequest(candidates, highRequest) !== undefined;
+  const visibleHigh = findUniqueVisibleLabelForRequest(visibleButtons, highRequest) !== undefined;
+  return selectedModel && candidateModel && candidateHigh && visibleHigh;
 }
 
 export async function getMode(

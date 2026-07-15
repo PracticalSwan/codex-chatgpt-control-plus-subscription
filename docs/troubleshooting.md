@@ -63,6 +63,12 @@ kernel times out, reconnect to the same visible thread, then use bounded
 prompt again; only report a captured answer when the valid read shows both
 turn counts advanced beyond the saved baselines.
 
+The current Plus mode picker may show `GPT-5.6 Sol` and `High` while the
+composer reports only `High` after selection. That is the active GPT-5.6 Sol
+High state, not a model-verification failure, when `modes.set` successfully
+selected both rows and its candidate list contains both labels. Do not block
+or fall back to another model in that case.
+
 ## Doctor Preflight
 
 Run `doctor({ check: ["bridge", "login", "upload"] })` before long workflows when browser state or permissions are uncertain. Use opt-in checks such as `existing_tab`, `artifacts`, `file_preflight`, `localization`, and `reports` before targeted workflows. The `localization` check verifies registry readiness, not full localized selector coverage. The `file_preflight` check validates supplied local file metadata without opening ChatGPT or attempting upload.

@@ -1,5 +1,9 @@
 # Changelog
 
+- Treat the current GPT-5.6 Sol Plus picker state as verified when `modes.set`
+  selected both `GPT-5.6 Sol` and `High`, even when the composer keeps only
+  `High` visible afterward.
+
 ## 0.3.0-alpha.1
 
 - Hardens mode-menu detection and selection against thread/sidebar action menus, with locale-registry-backed thread-action vetoes and container-scoped menu enumeration.
