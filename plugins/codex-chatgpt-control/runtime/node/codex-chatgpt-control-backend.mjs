@@ -4413,18 +4413,22 @@ import path2 from "node:path";
 
 // src/platform/local-paths.ts
 import path from "node:path";
-function isHostAbsolutePath(value, platform = process.platform) {
+import { platform as readHostPlatform } from "node:os";
+function currentHostPathPlatform() {
+  return readHostPlatform();
+}
+function isHostAbsolutePath(value, platform = currentHostPathPlatform()) {
   if (value.length === 0) return false;
   if (platform === "win32") return isFullyQualifiedWindowsPath(value);
   return path.posix.isAbsolute(value);
 }
-function resolveForHostPath(value, platform = process.platform) {
+function resolveForHostPath(value, platform = currentHostPathPlatform()) {
   if (!isHostAbsolutePath(value, platform)) {
     throw new Error(`File attachment path must be absolute for the backend host: ${value}`);
   }
   return platform === "win32" ? path.win32.resolve(value) : path.posix.resolve(value);
 }
-function basenameForHostPath(value, platform = process.platform) {
+function basenameForHostPath(value, platform = currentHostPathPlatform()) {
   return platform === "win32" ? path.win32.basename(value) : path.posix.basename(value);
 }
 function isFullyQualifiedWindowsPath(value) {
@@ -4656,7 +4660,7 @@ async function fileMetadata(absolute, bytes, includeHash = false) {
   return metadata;
 }
 function extensionForHostPath(value) {
-  return process.platform === "win32" ? path2.win32.extname(value).toLowerCase() : path2.posix.extname(value).toLowerCase();
+  return currentHostPathPlatform() === "win32" ? path2.win32.extname(value).toLowerCase() : path2.posix.extname(value).toLowerCase();
 }
 function collectFilePreflightWarnings(files, warnings) {
   const byPath = /* @__PURE__ */ new Map();
@@ -7614,6 +7618,23 @@ function extractMenuItemsFromText(text) {
 async function enumerateVisibleMenuItems(page) {
   if (typeof page.evaluate === "function") {
     const labels = await page.evaluate(() => {
+      const visible = (element) => {
+        const html = element;
+        const rect = html.getBoundingClientRect?.();
+        if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+        let current = element;
+        while (current !== null) {
+          if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+            return false;
+          }
+          const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+          if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+            return false;
+          }
+          current = current.parentElement ?? null;
+        }
+        return true;
+      };
       const toItem = (node) => {
         const element = node;
         const label = (element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -7633,14 +7654,14 @@ async function enumerateVisibleMenuItems(page) {
         if (ariaLabel !== null) item.ariaLabel = ariaLabel;
         return item;
       };
-      const allRoleNodes = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']"));
-      const containers = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter((container) => typeof container.contains === "function");
+      const allRoleNodes = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']")).filter(visible);
+      const containers = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter((container) => visible(container) && typeof container.contains === "function");
       const scopedRoleNodes = containers.length > 0 ? allRoleNodes.filter((node) => containers.some((container) => container.contains(node))) : allRoleNodes;
       const roleItems = (scopedRoleNodes.length > 0 ? scopedRoleNodes : allRoleNodes).map(toItem).filter((item) => item.label.length > 0);
       if (roleItems.length > 0) {
         return { items: roleItems, labels: [], split: false };
       }
-      const menus = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).map((node) => node.innerText ?? node.textContent ?? "").filter(Boolean);
+      const menus = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter(visible).map((node) => node.innerText ?? node.textContent ?? "").filter(Boolean);
       return { items: [], labels: menus, split: true };
     });
     return labels.split ? labels.labels.flatMap((label) => extractMenuItemsFromText(label)) : labels.items.map((item) => ({ ...item, label: normalizeWhitespace(item.label), normalized: normalizeLabel(item.label) })).filter((item) => item.label.length > 0);
@@ -8501,8 +8522,19 @@ async function readSurfaceSnapshot(page) {
     const visible = (element) => {
       const html = element;
       const rect = html.getBoundingClientRect?.();
-      const style = typeof window !== "undefined" ? window.getComputedStyle?.(html) : void 0;
-      return (rect === void 0 || rect.width > 0 && rect.height > 0) && style?.display !== "none" && style?.visibility !== "hidden" && style?.opacity !== "0";
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
     };
     const labelFor = (element) => {
       const html = element;
@@ -8585,8 +8617,19 @@ async function clickUniqueExperienceControl(page, labels) {
     const visible = (element) => {
       const html = element;
       const rect = html.getBoundingClientRect?.();
-      const style = typeof window !== "undefined" ? window.getComputedStyle?.(html) : void 0;
-      return (rect === void 0 || rect.width > 0 && rect.height > 0) && style?.display !== "none" && style?.visibility !== "hidden" && style?.opacity !== "0";
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
     };
     const labelFor = (node) => {
       const html = node;
@@ -8701,6 +8744,10 @@ async function inspectConfiguration(env, args = {}) {
     if (rootOpened) {
       await page.waitForTimeout?.(150);
     }
+    const workAdvancedOpened = experience !== "work" || rootOpened && await ensureWorkAdvancedPanel(page);
+    if (experience === "work" && workAdvancedOpened) {
+      await page.waitForTimeout?.(150);
+    }
     const panel = await readConfigurationPanel(page);
     const rootItems = rootOpened ? await enumerateVisibleMenuItems(page) : [];
     const data = configurationInspectionFromSurface(
@@ -8713,7 +8760,7 @@ async function inspectConfiguration(env, args = {}) {
     if (args.includeOptions !== false && experience === "work" && panel.axisRows.length > 0) {
       for (const axis of WORK_AXES) {
         if (!data.availableAxes.includes(axis)) continue;
-        const options = await inspectWorkAxisOptions(page, axis);
+        const options = await inspectWorkAxisOptions(env, axis);
         if (options.length > 0) {
           data.options[axis] = options;
         }
@@ -8723,6 +8770,9 @@ async function inspectConfiguration(env, args = {}) {
     const warnings = [];
     if (!rootOpened) {
       warnings.push("No scoped configuration opener was available; inspection is limited to controls already visible in the composer.");
+    }
+    if (experience === "work" && rootOpened && !workAdvancedOpened) {
+      warnings.push("The Work configuration menu opened, but its Advanced model, effort, and speed controls could not be made visible.");
     }
     if (!data.verified) {
       warnings.push("The visible configuration could not be verified from a recognized Chat or Work selector profile.");
@@ -8801,7 +8851,7 @@ async function applyConfiguration(env, args) {
         selected.push({ axis, requested, selected: active });
         continue;
       }
-      const selection = before.experience === "work" ? await selectWorkAxis(page, axis, requested) : await selectChatAxis(env, axis, requested, args.timeoutMs);
+      const selection = before.experience === "work" ? await selectWorkAxis(env, axis, requested) : await selectChatAxis(env, axis, requested, args.timeoutMs);
       if (selection === void 0) {
         return configurationFailure(
           page,
@@ -8896,40 +8946,112 @@ function configurationInspectionFromSurface(experience, detectedProfile, evidenc
     evidence
   };
 }
-async function inspectWorkAxisOptions(page, axis) {
-  await ensureWorkConfigurationRoot(page);
-  if (!await clickWorkAxisRow(page, axis)) {
-    return [];
-  }
-  await page.waitForTimeout?.(120);
-  const options = filterWorkAxisOptions(await enumerateVisibleMenuItems(page), axis).map(menuItemToOption);
-  await page.keyboard?.press?.("Escape");
-  await page.waitForTimeout?.(80);
+async function inspectWorkAxisOptions(env, axis) {
+  const page = env.page;
+  const options = (await openWorkAxisOptions(env, axis)).map(menuItemToOption);
+  await closeConfigurationSubmenu(page);
   return dedupeOptions(options);
 }
-async function selectWorkAxis(page, axis, requested) {
+async function selectWorkAxis(env, axis, requested) {
+  const page = env.page;
   if (!WORK_AXES.includes(axis)) {
     return void 0;
   }
-  await ensureWorkConfigurationRoot(page);
-  if (!await clickWorkAxisRow(page, axis)) {
-    return void 0;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const candidates = await openWorkAxisOptions(env, axis);
+    const match = findConfigurationOption(candidates, requested);
+    if (match !== void 0 && await clickVisibleMenuItem(page, match)) {
+      await page.waitForTimeout?.(150);
+      return match.label;
+    }
+    if (attempt === 0) {
+      await closeConfigurationMenus(page);
+      await page.waitForTimeout?.(200);
+    }
   }
-  await page.waitForTimeout?.(120);
-  const candidates = filterWorkAxisOptions(await enumerateVisibleMenuItems(page), axis);
-  const match = findConfigurationOption(candidates, requested);
-  if (match === void 0 || !await clickVisibleMenuItem(page, match)) {
-    return void 0;
+  return void 0;
+}
+async function openWorkAxisOptions(env, axis, allowRootRetry = true) {
+  const page = env.page;
+  if (!await ensureWorkAdvancedPanel(page)) return [];
+  const row = await findWorkAxisRow(page, axis);
+  if (row === void 0) return [];
+  const visibleOptions = async () => filterWorkAxisOptions(await enumerateVisibleMenuItems(page), axis);
+  const alreadyOpen = await visibleOptions();
+  if (alreadyOpen.length > 0) return alreadyOpen;
+  const point = await locatorCenter(row);
+  if (point !== void 0 && await movePointerWithCdp(env, point)) {
+    await page.waitForTimeout?.(180);
+    const hoveredOptions = await visibleOptions();
+    if (hoveredOptions.length > 0) return hoveredOptions;
+    await movePointerWithCdp(env, { x: point.x - 2, y: point.y });
+    await movePointerWithCdp(env, point);
+    await page.waitForTimeout?.(180);
+    const retriedOptions = await visibleOptions();
+    if (retriedOptions.length > 0) return retriedOptions;
   }
-  await page.waitForTimeout?.(150);
-  return match.label;
+  if (point !== void 0 && page.mouse?.move !== void 0) {
+    try {
+      await page.mouse.move(point.x, point.y);
+    } catch {
+    }
+    await page.waitForTimeout?.(180);
+    const mouseOptions = await visibleOptions();
+    if (mouseOptions.length > 0) return mouseOptions;
+  }
+  if (point !== void 0 && typeof page.cua?.move === "function") {
+    try {
+      await page.cua.move(point);
+    } catch {
+    }
+    await page.waitForTimeout?.(180);
+    const movedOptions = await visibleOptions();
+    if (movedOptions.length > 0) return movedOptions;
+  }
+  if (row.click !== void 0) {
+    await row.click().catch(() => void 0);
+    await page.waitForTimeout?.(180);
+  }
+  const clickedOptions = await visibleOptions();
+  if (clickedOptions.length > 0 || !allowRootRetry) return clickedOptions;
+  await closeConfigurationMenus(page);
+  await page.waitForTimeout?.(200);
+  return openWorkAxisOptions(env, axis, false);
+}
+async function locatorCenter(locator) {
+  if (locator.evaluate === void 0) return void 0;
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2)
+    };
+  }).catch(() => void 0);
+}
+async function movePointerWithCdp(env, point) {
+  const page = env.page;
+  const tabId = page === void 0 ? void 0 : tabIdFromPage(page);
+  if (tabId === void 0 || env.browser?.tabs?.get === void 0) return false;
+  try {
+    const tab = await env.browser.tabs.get(tabId);
+    const capability2 = await tab.capabilities?.get?.("cdp");
+    if (capability2?.send === void 0) return false;
+    await capability2.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      button: "none",
+      buttons: 0,
+      pointerType: "mouse"
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 function filterWorkAxisOptions(items, axis) {
   return items.filter((item) => {
     if (isConfigurationAxisRow(item.label)) return false;
-    if (item.checked !== void 0 || item.role === "menuitemradio" || item.role === "option") {
-      return true;
-    }
     return workAxisOptionLabelMatches(axis, item.label);
   });
 }
@@ -8979,8 +9101,19 @@ async function openConfigurationRoot(page, experience) {
       const visible = (element) => {
         const html = element;
         const rect = html.getBoundingClientRect?.();
-        const style = typeof window !== "undefined" ? window.getComputedStyle?.(html) : void 0;
-        return (rect === void 0 || rect.width > 0 && rect.height > 0) && style?.display !== "none" && style?.visibility !== "hidden" && style?.opacity !== "0";
+        if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+        let current = element;
+        while (current !== null) {
+          if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+            return false;
+          }
+          const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+          if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+            return false;
+          }
+          current = current.parentElement ?? null;
+        }
+        return true;
       };
       const composerRoots = Array.from(document.querySelectorAll(
         "main form, main [data-testid*='composer' i], main [class*='composer' i]"
@@ -9031,6 +9164,9 @@ function configurationMenuLooksRecognized(items, experience, openerLabel) {
   if (items.some((item) => /(?:model|mode|effort|speed)-(?:switcher|selector)|model-switcher/i.test(item.testId ?? ""))) {
     return true;
   }
+  if (experience === "work" && items.some((item) => localeLabels.configurationAxes.advanced.some((label) => visibleLabelMatches(item.label, label)))) {
+    return true;
+  }
   if (openerLabel === void 0 || items.length === 0) {
     return false;
   }
@@ -9056,12 +9192,19 @@ function configurationMenuLooksRecognized(items, experience, openerLabel) {
   );
   return matched.size >= 2;
 }
-async function ensureWorkConfigurationRoot(page) {
+async function ensureWorkAdvancedPanel(page) {
   const panel = await readConfigurationPanel(page);
   if (panel.axisRows.length > 0) return true;
-  await page.keyboard?.press?.("Escape");
-  await page.waitForTimeout?.(50);
-  return openConfigurationRoot(page, "work");
+  if (!await openConfigurationRoot(page, "work")) return false;
+  const reopenedPanel = await readConfigurationPanel(page);
+  if (reopenedPanel.axisRows.length > 0) return true;
+  const items = await enumerateVisibleMenuItems(page);
+  const advanced = items.filter((item) => localeLabels.configurationAxes.advanced.some((label) => visibleLabelMatches(item.label, label)));
+  if (advanced.length !== 1 || !await clickVisibleMenuItem(page, advanced[0])) {
+    return false;
+  }
+  await page.waitForTimeout?.(200);
+  return (await readConfigurationPanel(page)).axisRows.length > 0;
 }
 async function readConfigurationPanel(page) {
   if (typeof page.evaluate !== "function") {
@@ -9078,8 +9221,19 @@ async function readConfigurationPanel(page) {
     const visible = (element) => {
       const html = element;
       const rect = html.getBoundingClientRect?.();
-      const style = typeof window !== "undefined" ? window.getComputedStyle?.(html) : void 0;
-      return (rect === void 0 || rect.width > 0 && rect.height > 0) && style?.display !== "none" && style?.visibility !== "hidden" && style?.opacity !== "0";
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
     };
     const overlays = Array.from(document.querySelectorAll(
       "[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper], [data-radix-menu-content]"
@@ -9089,14 +9243,10 @@ async function readConfigurationPanel(page) {
       "button, [role='button'], [role='menuitem'], [role='menuitemradio'], [role='option']"
     ))).filter(visible);
     const axisRows = [];
-    let advancedVisible = false;
     for (const row of rows) {
       const html = row;
       const label = normalize(row.getAttribute("aria-label") ?? html.innerText ?? row.textContent ?? "");
       const normalized = label.toLocaleLowerCase();
-      if (normalizedAxes.advanced?.some((candidate) => normalized === candidate || normalized.startsWith(`${candidate} `))) {
-        advancedVisible = true;
-      }
       for (const axis of ["model", "intelligence", "effort", "speed"]) {
         const candidates = normalizedAxes[axis] ?? [];
         const prefix = candidates.find((candidate) => normalized === candidate || normalized.startsWith(`${candidate} `));
@@ -9127,7 +9277,7 @@ async function readConfigurationPanel(page) {
     }).filter((item) => !/send|voice|microphone|attach|upload|add files|plus/i.test(`${item.label} ${item.testId}`)).filter((item) => /model-switcher|model-selector|mode-selector/i.test(item.testId) || /\b(?:gpt|sol|luna|terra|instant|medium|high|extra high|pro|thinking|extended|light|standard|fast)\b/i.test(item.label));
     const result = {
       axisRows,
-      advancedVisible
+      advancedVisible: axisRows.length > 0
     };
     if (openerCandidates.length === 1 && openerCandidates[0]?.label.length) {
       result.openerLabel = openerCandidates[0].label;
@@ -9135,33 +9285,18 @@ async function readConfigurationPanel(page) {
     return result;
   }, localeLabels.configurationAxes).catch(() => ({ axisRows: [], advancedVisible: false }));
 }
-async function clickWorkAxisRow(page, axis) {
+async function findWorkAxisRow(page, axis) {
   const labels = axis === "modelVersion" ? [] : localeLabels.configurationAxes[axis] ?? [];
   for (const label of labels) {
     const pattern = new RegExp(`^${escapeRegExp3(label)}(?:\\s|$)`, "i");
     for (const role of ["button", "menuitem"]) {
-      if (await clickIfUnique3(page.getByRole?.(role, { name: pattern }))) {
-        return true;
+      const locator = page.getByRole?.(role, { name: pattern });
+      if (locator?.count !== void 0 && await locator.count().catch(() => 0) === 1) {
+        return locator;
       }
     }
   }
-  if (typeof page.evaluate !== "function") return false;
-  return page.evaluate((wantedLabels) => {
-    const normalize = (value) => value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
-    const wanted = wantedLabels.map(normalize);
-    const overlays = Array.from(document.querySelectorAll(
-      "[role='menu'], [data-radix-popper-content-wrapper], [data-radix-menu-content]"
-    ));
-    const nodes = overlays.flatMap((root) => Array.from(root.querySelectorAll("button, [role='button'], [role='menuitem']")));
-    const matches = nodes.filter((node) => {
-      const html = node;
-      const label = normalize(node.getAttribute("aria-label") ?? html.innerText ?? node.textContent ?? "");
-      return wanted.some((prefix) => label === prefix || label.startsWith(`${prefix} `));
-    });
-    if (matches.length !== 1) return false;
-    matches[0].click();
-    return true;
-  }, labels).catch(() => false);
+  return void 0;
 }
 async function clickVisibleMenuItem(page, item) {
   if (item.testId !== void 0 && await clickIfUnique3(page.locator?.(`[data-testid="${escapeAttributeValue2(item.testId)}"]`))) {
@@ -9282,14 +9417,46 @@ function normalizeConfigurationId(value) {
   return normalizeForLabelMatch(value).replace(/^gpt[\s-]*/i, "gpt ").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 async function closeConfigurationMenus(page) {
-  await page.keyboard?.press?.("Escape");
+  if (!await pressConfigurationEscape(page)) return;
   await page.waitForTimeout?.(50);
-  await page.keyboard?.press?.("Escape");
+  await pressConfigurationEscape(page);
+}
+async function closeConfigurationSubmenu(page) {
+  if (!await pressConfigurationEscape(page)) return;
+  await page.waitForTimeout?.(200);
+}
+async function pressConfigurationEscape(page) {
+  if (page.keyboard?.press !== void 0) {
+    await page.keyboard.press("Escape");
+    return true;
+  }
+  if (page.cua?.keypress !== void 0) {
+    try {
+      await page.cua.keypress({ keys: ["ESC"] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 async function clickIfUnique3(locator) {
   if (locator?.count === void 0 || locator.click === void 0) return false;
-  if (await locator.count().catch(() => 0) !== 1) return false;
-  await locator.click();
+  const count = await locator.count().catch(() => 0);
+  if (count === 1) {
+    await locator.click();
+    return true;
+  }
+  if (count <= 1 || locator.nth === void 0) return false;
+  const visible = [];
+  for (let index = 0; index < count; index += 1) {
+    const candidate = locator.nth(index);
+    if (candidate.isVisible !== void 0 && await candidate.isVisible().catch(() => false)) {
+      visible.push(candidate);
+    }
+  }
+  if (visible.length !== 1 || visible[0]?.click === void 0) return false;
+  await visible[0].click();
   return true;
 }
 async function configurationFailure(page, before, desired, selected, message, code, candidates = []) {
