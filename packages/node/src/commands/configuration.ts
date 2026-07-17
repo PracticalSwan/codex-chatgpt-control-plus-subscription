@@ -363,6 +363,10 @@ async function openConfigurationRoot(page: PageLike, experience: ChatGPTExperien
   if (configurationMenuLooksRecognized(existingItems, experience, existing.openerLabel)) {
     return true;
   }
+  if (existing.openerLabel !== undefined
+    && await clickIfUnique(page.getByRole?.("button", { name: existing.openerLabel, exact: true }))) {
+    return true;
+  }
 
   if (typeof page.evaluate === "function") {
     const clicked = await page.evaluate((surface: ChatGPTExperience) => {
@@ -376,8 +380,17 @@ async function openConfigurationRoot(page: PageLike, experience: ChatGPTExperien
           && style?.visibility !== "hidden"
           && style?.opacity !== "0";
       };
-      const forms = Array.from(document.querySelectorAll("main form, main [data-testid*='composer' i]"));
-      const controls = forms.flatMap(form => Array.from(form.querySelectorAll("button, [role='button']")))
+      const composerRoots = Array.from(document.querySelectorAll(
+        "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+      ));
+      const main = document.querySelector("main");
+      const roots = Array.from(new Set<Element>([
+        ...composerRoots,
+        ...(main === null ? [] : [main])
+      ]));
+      const controls = Array.from(new Set(roots.flatMap(root =>
+        Array.from(root.querySelectorAll("button, [role='button']"))
+      )))
         .filter(visible);
       const matches = controls.filter(control => {
         const html = control as HTMLElement;
@@ -515,8 +528,17 @@ async function readConfigurationPanel(page: PageLike): Promise<ConfigurationPane
       }
     }
 
-    const forms = Array.from(document.querySelectorAll("main form, main [data-testid*='composer' i]"));
-    const openerCandidates = forms.flatMap(form => Array.from(form.querySelectorAll("button, [role='button']")))
+    const composerRoots = Array.from(document.querySelectorAll(
+      "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+    ));
+    const main = document.querySelector("main");
+    const openerRoots = Array.from(new Set<Element>([
+      ...composerRoots,
+      ...(main === null ? [] : [main])
+    ]));
+    const openerCandidates = Array.from(new Set(openerRoots.flatMap(root =>
+      Array.from(root.querySelectorAll("button, [role='button']"))
+    )))
       .filter(visible)
       .map(control => {
         const html = control as HTMLElement;

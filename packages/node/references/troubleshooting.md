@@ -80,6 +80,13 @@ loaded and the SDK refused to append. Pass `newTask: false` only when the user
 intends to continue that exact task. If a Work submission returns partial or
 timeout, use `work.status`, `work.wait`, or `work.readLatest`; do not resubmit.
 
+On the current home page, inspect the `Select chat surface` Chat/Work radio
+group before diagnosing Work as unavailable. Once a Work task is active, that
+radio group can disappear; the compound model-plus-effort opener is the SDK's
+continuation evidence, while the visible Work task chrome can corroborate a
+manual diagnosis. `experience.open` returns to the home selector before
+changing panes from an active task.
+
 ## Existing Tab Not Found Or Ambiguous
 
 When `existingTab` targeting cannot select one already-open tab, inspect `blocker.diagnostics.existingTab` or the rendered blocker explanation. Diagnostics are metadata-only: requested target, whether user-open tabs were available, candidate tab IDs, URLs, titles, conversation IDs, omitted candidate count, and mismatch reason. They must not include page text or chat content.

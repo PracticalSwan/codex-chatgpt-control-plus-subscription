@@ -23,7 +23,10 @@ type SurfaceSnapshot = {
   composerLabels: string[];
   mainControls: string[];
   mainText: string;
+  selectedSurfaceLabels?: string[];
 };
+
+const CHATGPT_HOME = "https://chatgpt.com/";
 
 export async function detectExperience(
   env: RuntimeEnv,
@@ -74,7 +77,23 @@ export async function openExperience(
     }
 
     const labels = localeLabels.experienceOptions[args.experience];
-    if (!await clickUniqueExperienceControl(page, labels)) {
+    let controlClicked = await clickUniqueExperienceControl(page, labels);
+    if (!controlClicked && await navigateConversationToSurfaceHome(page, args.timeoutMs)) {
+      const atHome = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+      if (atHome.experience === args.experience) {
+        return resultOk({
+          experience: args.experience,
+          previousExperience: before.experience,
+          changed: true,
+          selectorProfile: atHome.selectorProfile
+        }, await contextFromPage(page, {
+          experience: atHome.experience,
+          selectorProfile: atHome.selectorProfile
+        }));
+      }
+      controlClicked = await clickUniqueExperienceControl(page, labels);
+    }
+    if (!controlClicked) {
       return experienceSelectorDrift(
         page,
         `No unique visible ChatGPT ${args.experience === "work" ? "Work" : "Chat"} surface control was found.`,
@@ -123,12 +142,38 @@ export async function openExperience(
   }
 }
 
+async function navigateConversationToSurfaceHome(
+  page: PageLike,
+  timeoutMs: number | undefined
+): Promise<boolean> {
+  if (page.goto === undefined || page.url === undefined) return false;
+  const currentUrl = await Promise.resolve(page.url()).catch(() => "");
+  if (!/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) return false;
+  await page.goto(CHATGPT_HOME, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs ?? 30000
+  });
+  await page.waitForTimeout?.(500);
+  return true;
+}
+
 export function detectExperienceFromSnapshot(snapshot: SurfaceSnapshot): DetectExperienceData {
   const evidence: ExperienceEvidence[] = [];
   const composerLabels = snapshot.composerLabels.map(normalizeForLabelMatch);
   const controls = snapshot.mainControls.map(normalizeForLabelMatch);
   const mainText = normalizeForLabelMatch(snapshot.mainText);
+  const selectedSurfaceLabels = (snapshot.selectedSurfaceLabels ?? []).map(normalizeForLabelMatch);
   const url = snapshot.url.toLowerCase();
+
+  const selectedWork = matchingLabels(selectedSurfaceLabels, localeLabels.experienceOptions.work);
+  const selectedChat = matchingLabels(selectedSurfaceLabels, localeLabels.experienceOptions.chat);
+  const workSurfaceSelected = selectedWork.length > 0 && selectedChat.length === 0;
+  const chatSurfaceSelected = selectedChat.length > 0 && selectedWork.length === 0;
+  if (workSurfaceSelected) {
+    evidence.push({ source: "control", label: "Work surface selected" });
+  } else if (chatSurfaceSelected) {
+    evidence.push({ source: "control", label: "Chat surface selected" });
+  }
 
   const workComposer = matchingLabels(composerLabels, localeLabels.workComposerTextbox);
   for (const label of workComposer) {
@@ -146,6 +191,20 @@ export function detectExperienceFromSnapshot(snapshot: SurfaceSnapshot): DetectE
   if (workAxisCount >= 2) {
     evidence.push({ source: "control", label: `Work configuration axes (${workAxisCount}/3)` });
   }
+  const workConfigurationOpener = controls.some(label =>
+    /\b(?:gpt[\s-]?\d|\d+(?:\.\d+)+|sol|luna|terra)\b/i.test(label)
+    && hasAnyLabel([label], [
+      ...localeLabels.configurationOptions.light,
+      ...localeLabels.configurationOptions.medium,
+      ...localeLabels.configurationOptions.high,
+      ...localeLabels.configurationOptions.extraHigh,
+      ...localeLabels.configurationOptions.max,
+      ...localeLabels.configurationOptions.ultra,
+    ])
+  );
+  if (workConfigurationOpener) {
+    evidence.push({ source: "control", label: "Work configuration opener" });
+  }
 
   if (/\/work(?:\/|$|\?)/.test(url)) {
     evidence.push({ source: "url", label: snapshot.url });
@@ -155,16 +214,22 @@ export function detectExperienceFromSnapshot(snapshot: SurfaceSnapshot): DetectE
   }
 
   const workScore = workComposer.length * 4
+    + (workSurfaceSelected ? 10 : 0)
     + (workAxisCount >= 2 ? 4 : 0)
+    // The active Work task drops the Chat/Work radio and keeps the shared
+    // "Chat with ChatGPT" textbox name. Its compound model + effort opener is
+    // therefore strong enough to disambiguate that continuation surface.
+    + (workConfigurationOpener ? 6 : 0)
     + (/\/work(?:\/|$|\?)/.test(url) ? 3 : 0)
     + (containsAny(mainText, ["work on something else", "work on anything"]) ? 2 : 0);
-  const chatScore = chatComposer.length * 4;
+  const chatScore = chatComposer.length * 4
+    + (chatSurfaceSelected ? 10 : 0);
 
   let experience: ChatGPTExperience = "unknown";
   let confidence: ExperienceConfidence = "low";
   if (workScore > chatScore && workScore >= 4) {
     experience = "work";
-    confidence = workScore >= 7 ? "high" : "medium";
+    confidence = workSurfaceSelected || workScore >= 7 ? "high" : "medium";
   } else if (chatScore > workScore && chatScore >= 4) {
     experience = "chat";
     confidence = "high";
@@ -179,10 +244,10 @@ export async function readSurfaceSnapshot(page: PageLike): Promise<SurfaceSnapsh
     ? await Promise.resolve(page.url()).catch(() => "")
     : "";
   if (typeof page.evaluate !== "function") {
-    return { url, composerLabels: [], mainControls: [], mainText: "" };
+    return { url, composerLabels: [], mainControls: [], mainText: "", selectedSurfaceLabels: [] };
   }
 
-  const snapshot = await page.evaluate(() => {
+  const snapshot = await page.evaluate((surfaceOptionLabels: string[]) => {
     const visible = (element: Element): boolean => {
       const html = element as HTMLElement;
       const rect = html.getBoundingClientRect?.();
@@ -201,6 +266,8 @@ export async function readSurfaceSnapshot(page: PageLike): Promise<SurfaceSnapsh
         ?? "";
     };
     const normalize = (value: string): string => value.replace(/\s+/g, " ").trim();
+    const normalizeComparable = (value: string): string => normalize(value).toLocaleLowerCase();
+    const wantedSurfaceLabels = new Set(surfaceOptionLabels.map(normalizeComparable));
     const composerRoots = Array.from(document.querySelectorAll(
       "main form, main [data-testid*='composer' i], main [class*='composer' i]"
     ));
@@ -236,8 +303,19 @@ export async function readSurfaceSnapshot(page: PageLike): Promise<SurfaceSnapsh
       .filter(visible)
       .slice(0, 32);
     const mainText = normalize(surfaceTextNodes.map(labelFor).join(" ")).slice(0, 2000);
-    return { composerLabels, mainControls, mainText };
-  }).catch(() => ({ composerLabels: [], mainControls: [], mainText: "" }));
+    const selectedSurfaceLabels = Array.from(new Set(Array.from(document.querySelectorAll(
+      "[role='radio'][aria-checked='true'], [role='radio'][data-state='checked'], input[type='radio']:checked"
+    ))
+      .filter(visible)
+      .map(labelFor)
+      .map(normalize)
+      .filter(label => wantedSurfaceLabels.has(normalizeComparable(label)))))
+      .slice(0, 4);
+    return { composerLabels, mainControls, mainText, selectedSurfaceLabels };
+  }, [
+    ...localeLabels.experienceOptions.chat,
+    ...localeLabels.experienceOptions.work,
+  ]).catch(() => ({ composerLabels: [], mainControls: [], mainText: "", selectedSurfaceLabels: [] }));
 
   return { url, ...snapshot };
 }
@@ -281,7 +359,7 @@ function profileFromSnapshot(
 
 async function clickUniqueExperienceControl(page: PageLike, labels: string[]): Promise<boolean> {
   for (const label of labels) {
-    for (const role of ["button", "menuitem", "tab", "link"]) {
+    for (const role of ["radio", "button", "menuitem", "tab", "link"]) {
       if (await clickIfUnique(page.getByRole?.(role, { name: label, exact: true }))) {
         return true;
       }
@@ -294,14 +372,30 @@ async function clickUniqueExperienceControl(page: PageLike, labels: string[]): P
   return page.evaluate((wantedLabels: string[]) => {
     const normalize = (value: string): string => value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
     const wanted = new Set(wantedLabels.map(normalize));
-    const nodes = Array.from(document.querySelectorAll(
-      "header button, header [role='button'], header [role='tab'], main [role='menuitem'], main [role='option']"
-    ));
-    const matches = nodes.filter(node => {
+    const visible = (element: Element): boolean => {
+      const html = element as HTMLElement;
+      const rect = html.getBoundingClientRect?.();
+      const style = typeof window !== "undefined" ? window.getComputedStyle?.(html) : undefined;
+      return (rect === undefined || (rect.width > 0 && rect.height > 0))
+        && style?.display !== "none"
+        && style?.visibility !== "hidden"
+        && style?.opacity !== "0";
+    };
+    const labelFor = (node: Element): string => {
       const html = node as HTMLElement;
-      const label = node.getAttribute("aria-label") ?? html.innerText ?? node.textContent ?? "";
-      return wanted.has(normalize(label));
-    });
+      const inputLabels = "labels" in node
+        ? Array.from((node as HTMLInputElement).labels ?? []).map(label => label.innerText).join(" ")
+        : "";
+      return node.getAttribute("aria-label")
+        || inputLabels
+        || html.innerText
+        || node.textContent
+        || "";
+    };
+    const nodes = Array.from(document.querySelectorAll(
+      "[role='radio'], input[type='radio'], header button, header [role='button'], header [role='tab'], main [role='menuitem'], main [role='option']"
+    ));
+    const matches = nodes.filter(node => visible(node) && wanted.has(normalize(labelFor(node))));
     if (matches.length !== 1) return false;
     (matches[0] as HTMLElement).click();
     return true;
