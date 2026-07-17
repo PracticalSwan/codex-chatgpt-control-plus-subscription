@@ -13,6 +13,8 @@ const PYTHON_ROOT = join(REPO_ROOT, "packages", "python");
 const NPM_PACKAGE = "codex-chatgpt-control";
 const PYPI_PACKAGE = "codex-chatgpt-control";
 const PYTHON_IMPORT = "codex_chatgpt_control";
+const NPM_REGISTRY = "https://registry.npmjs.org";
+const PYPI_INDEX = "https://pypi.org/simple";
 const REQUEST_SCHEMA = "chatgpt.browser_control.backend_request.v1";
 const RESPONSE_SCHEMA = "chatgpt.browser_control.backend_response.v1";
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -80,15 +82,35 @@ async function waitForRegistryVersions(versions, timeoutMs) {
         "view",
         `${NPM_PACKAGE}@${versions.nodeVersion}`,
         "version",
-        "--json"
+        "--json",
+        `--registry=${NPM_REGISTRY}`
       ], { capture: true }));
       const response = await fetch(`https://pypi.org/pypi/${PYPI_PACKAGE}/${versions.pythonVersion}/json`, {
         headers: { "User-Agent": "codex-chatgpt-control-release-verifier" }
       });
       const pypi = response.ok ? await response.json() : undefined;
       const pypiVersion = pypi?.info?.version;
-      if (npmVersion === versions.nodeVersion && pypiVersion === versions.pythonVersion) return;
-      last = `npm=${String(npmVersion)} pypi=${String(pypiVersion)} status=${response.status}`;
+      const simpleResponse = await fetch(`${PYPI_INDEX}/${PYPI_PACKAGE}/`, {
+        headers: {
+          Accept: "application/vnd.pypi.simple.v1+json",
+          "User-Agent": "codex-chatgpt-control-release-verifier"
+        }
+      });
+      const simple = simpleResponse.ok ? await simpleResponse.json() : undefined;
+      const simpleHasVersion = Array.isArray(simple?.files) && simple.files.some(file =>
+        typeof file?.filename === "string" && (
+          file.filename.includes(`-${versions.pythonVersion}-`) ||
+          file.filename.includes(`-${versions.pythonVersion}.`)
+        )
+      );
+      if (npmVersion === versions.nodeVersion && pypiVersion === versions.pythonVersion && simpleHasVersion) return;
+      last = [
+        `npm=${String(npmVersion)}`,
+        `pypi=${String(pypiVersion)}`,
+        `pypiJsonStatus=${response.status}`,
+        `pypiSimple=${String(simpleHasVersion)}`,
+        `pypiSimpleStatus=${simpleResponse.status}`
+      ].join(" ");
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
@@ -111,14 +133,15 @@ async function sourceSpecs(root) {
   run(python, ["-m", "build", "--sdist", "--wheel", "--outdir", pythonDist, PYTHON_ROOT]);
   const wheel = (await readdir(pythonDist)).find(file => file.endsWith(".whl"));
   if (wheel === undefined) throw new Error("Python build did not produce a wheel");
-  return { nodeSpec: join(nodeDist, basename(filename)), pythonSpec: join(pythonDist, wheel) };
+  return { nodeSpec: join(nodeDist, basename(filename)), pythonSpec: join(pythonDist, wheel), registry: false };
 }
 
 async function registrySpecs(versions, timeoutMs) {
   await waitForRegistryVersions(versions, timeoutMs);
   return {
     nodeSpec: `${NPM_PACKAGE}@${versions.nodeVersion}`,
-    pythonSpec: `${PYPI_PACKAGE}==${versions.pythonVersion}`
+    pythonSpec: `${PYPI_PACKAGE}==${versions.pythonVersion}`,
+    registry: true
   };
 }
 
@@ -127,7 +150,10 @@ async function installAndVerify(root, specs, versions) {
   const pythonEnv = join(root, "python-env");
   await mkdir(nodeEnv, { recursive: true });
   await writeFile(join(nodeEnv, "package.json"), '{"private":true,"type":"module"}\n', "utf8");
-  run(command("npm"), ["install", "--ignore-scripts", "--no-audit", "--no-fund", specs.nodeSpec], { cwd: nodeEnv });
+  const npmInstallArgs = ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
+  if (specs.registry) npmInstallArgs.push(`--registry=${NPM_REGISTRY}`);
+  npmInstallArgs.push(specs.nodeSpec);
+  run(command("npm"), npmInstallArgs, { cwd: nodeEnv });
 
   const installedNodeRoot = join(nodeEnv, "node_modules", NPM_PACKAGE);
   const installedNode = JSON.parse(await readFile(join(installedNodeRoot, "package.json"), "utf8"));
@@ -155,7 +181,10 @@ async function installAndVerify(root, specs, versions) {
   const venvCli = process.platform === "win32"
     ? join(pythonEnv, "Scripts", "chatgpt-thread.exe")
     : join(pythonEnv, "bin", "chatgpt-thread");
-  run(venvPython, ["-m", "pip", "install", "--disable-pip-version-check", specs.pythonSpec]);
+  const pipInstallArgs = ["-m", "pip", "install", "--disable-pip-version-check"];
+  if (specs.registry) pipInstallArgs.push("--index-url", PYPI_INDEX, "--no-cache-dir");
+  pipInstallArgs.push(specs.pythonSpec);
+  run(venvPython, pipInstallArgs);
   const backendLiteral = backendPath.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
   const pythonCheck = [
     "from importlib.metadata import version",
