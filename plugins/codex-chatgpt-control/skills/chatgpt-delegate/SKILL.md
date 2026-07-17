@@ -148,6 +148,20 @@ const artifacts = await chatgpt.work.artifacts.listLatest({});
 
 Use `chatgpt.work.artifacts.wait(...)` and `downloadLatest(...)` for visible downloadable deliverables. Attach only user-approved absolute host-local paths.
 
+When the deliverable has a known filename, use the file workflow with an exact
+case-insensitive regular expression:
+
+```js
+await chatgpt.files.downloadLatest({
+  destDir: "/absolute/output/dir",
+  filenamePattern: "^report\\.csv$"
+});
+```
+
+This supports direct file links and filename-labelled artifact previews. A
+filename mismatch is a blocker, not permission to accept another visible image
+or older file.
+
 ## Compatibility
 
 The legacy `mode` runner input, `chatgpt.modes.set/get`, and `chatgpt-pro-consult` skill still work for existing callers. New work should use `experience` plus `configuration`, because Chat and Work expose different nested axes and strict postcondition verification.

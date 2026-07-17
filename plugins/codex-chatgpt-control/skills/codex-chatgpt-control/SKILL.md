@@ -181,6 +181,26 @@ await chatgpt.askWithFiles({
 });
 ```
 
+Download an exact generated deliverable without accepting another visible
+artifact as success:
+
+```js
+await chatgpt.askAndDownload({
+  prompt: "Create report.csv and provide it as a downloadable file.",
+  download: {
+    destDir: "/absolute/output/dir",
+    filenamePattern: "^report\\.csv$"
+  },
+  wait: true,
+  read: true
+});
+```
+
+`filenamePattern` is a case-insensitive regular expression. The runtime handles
+both direct file links and current filename-button -> artifact-preview ->
+Download flows. A mismatch blocks instead of silently accepting an unrelated
+image fallback.
+
 Run a diagnostic before long workflows:
 
 ```js
