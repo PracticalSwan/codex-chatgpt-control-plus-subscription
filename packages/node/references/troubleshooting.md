@@ -49,7 +49,7 @@ python scripts/live_smoke.py \
   --backend-command "node scripts/http_stdio_relay.mjs"
 ```
 
-Keep the bridge-hosted JS execution active while Python runs. If that call returns first, browser operations can fail with `node_repl exec context not found`.
+Create the backend server and wait on it in the **same** bridge-hosted JS execution. Starting it in one Node REPL call and waiting in another loses the first call's browser execution context. Keep that single call active while Python runs. If it returns first, browser operations can fail with `node_repl exec context not found`.
 
 ## `login_required`
 

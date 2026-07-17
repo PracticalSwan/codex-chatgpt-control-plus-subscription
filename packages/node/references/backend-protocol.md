@@ -277,7 +277,7 @@ python scripts/live_smoke.py \
   --backend-command "node scripts/http_stdio_relay.mjs"
 ```
 
-The bridge-hosted JS execution must remain active for the duration of the Python smoke. The relay path is:
+Create the backend server and wait on it in the **same** bridge-hosted JS execution. A server created in one Node REPL call cannot be kept bridge-capable by waiting in a second call. That single execution must remain active for the duration of the Python smoke. The relay path is:
 
 ```text
 Python SDK -> stdio relay -> bridge-hosted Node backend -> Codex Chrome bridge -> ChatGPT
