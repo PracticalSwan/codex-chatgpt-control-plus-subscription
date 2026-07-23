@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.1a1
+
+- Forwards `completion_gate` and its nested snake-case policy keys to the
+  Node-owned `completionGate` wire contract.
+- Preserves structured completion-gate status and metadata-only redaction
+  without adding a separate Python browser implementation.
+- Picks up the corrected Node-backed Chat/Work radio selection and active Work
+  detection without changing the Python API or shared wire shapes.
+- Retains sync/async experience, configuration, Work, Runner, and Responses
+  parity while the expanded cross-language and package-install gates qualify
+  the replacement alpha.
+
+## 0.5.0a1
+
+- Adds matching sync and async `experience`, `configuration`, and `work` clients.
+- Adds typed surface-profile, configuration, and Work lifecycle models.
+- Recursively converts nested snake-case Python dictionaries to the shared camel-case backend wire shape.
+- Preserves existing mode methods and package imports while adding runner/Responses support for Chat and Work preferences.
+
 ## 0.3.0a1
 
 - Adds `chatgpt.modes.get()` to the sync and async facades, matching the new backend `modes.get` primitive.

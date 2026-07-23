@@ -67,7 +67,20 @@ Current protocol error codes are:
 
 Browser-control blockers are not protocol errors. They are normal command or runner results with `status: "blocked"`, `status: "partial"`, or `status: "needs_confirmation"` plus blocker/interruption details.
 
-`status: "partial"` is the required result for incomplete response capture. A partial result may still include `output_text` and `data.responseText`, but consumers must treat that text as incomplete until a later wait confirms completion. Common causes are wait timeout after partial assistant text, active generation controls such as `Stop answering`, stopped-generation markers such as `Stopped thinking`, or a read fallback after the wait step could not confirm completion. For status-only polling, `messages.wait` accepts `responseContent: "metadata"`; partial and completed wait results then omit assistant text and instead return compact metadata such as `data.responseChars` and `data.responseSha256`. Intentional capture clipping uses `data.captureLimit` plus warnings; it is separate from ChatGPT generation length.
+`status: "partial"` is the required result for incomplete response capture. A partial result may still include `output_text` and `data.responseText`, but consumers must treat that text as incomplete until a later wait confirms completion. Common causes are wait timeout after partial assistant text, active generation controls such as `Stop answering`, stopped-generation markers such as `Stopped thinking`, or a read fallback after the wait step could not confirm completion. Message command data may include `submissionState`, `completionState`, `generationActive`, and `generationSignals`; `completionState: "generating"` or `generationActive: true` is explicit evidence that the visible ChatGPT turn is still running. For status-only polling, `messages.wait` accepts `responseContent: "metadata"`; partial and completed wait results then omit assistant text and instead return compact metadata such as `data.responseChars` and `data.responseSha256`. Intentional capture clipping uses `data.captureLimit` plus warnings; it is separate from ChatGPT generation length.
+
+`messages.wait` also accepts an optional `completionGate` object with `start`,
+`end`, `requireUnique`, and `requireNonEmptyBody`. The two policy flags default
+to true. The gate augments, rather than replaces, the ordinary completion
+predicate and both caller-provided turn baselines. `data.completionGate.status`
+is one of `complete`, `start_missing`, `end_missing`, `duplicate_start`,
+`duplicate_end`, `empty_body`, or `invalid_boundary`. A stable reply with a
+missing or malformed boundary remains `partial`; syntactically invalid gate
+configuration returns a non-recoverable `InvalidCompletionGate` error.
+`responseContent: "metadata"` still omits the assistant body while retaining
+gate status, character count, and SHA-256.
+
+Use `messages.status({ maxPreviewChars })` for a compact latest-assistant progress snapshot when a host tool-call ceiling is shorter than the expected ChatGPT generation. It returns counts, latest-assistant preview length, `completionState`, `generationActive`, and generation signals without treating partial text as final, and without the cost of a full `readLatest`/`wait` probe.
 
 ## Streaming
 
@@ -78,9 +91,10 @@ Streaming commands emit backend event lines until `completed` or `error`.
   "schemaVersion": "chatgpt.browser_control.backend_event.v1",
   "requestId": "req_stream",
   "type": "run_item_stream_event",
-  "name": "message_completed",
+  "name": "message_in_progress",
   "item": {
-    "type": "message.completed"
+    "type": "message.in_progress",
+    "completionState": "generating"
   }
 }
 ```
@@ -99,7 +113,7 @@ The final event contains a normal runner result:
 }
 ```
 
-Streaming is milestone streaming only. It does not promise token deltas or OpenAI API stream-event parity.
+Streaming is milestone streaming only. It does not promise token deltas or OpenAI API stream-event parity. Partial assistant text is emitted as `message_in_progress`; only completion-confirmed output is emitted as `message_completed`.
 
 ## Required Backend Commands
 
@@ -112,7 +126,14 @@ The backend must support:
 - diagnostics: `doctor`
 - reports: `createReport`, `reports.create`, `reports.redact`, `reports.summarize`
 - command discovery: `commands`, `describe`, `help`
-- primitives: `session.bootstrap`, `threads.*`, `messages.*`, `artifacts.*`, `files.preflight`, `files.attach`, `files.downloadLatest`, `projects.sources.list`, `projects.sources.planAdd`, `projects.sources.add`, `modes.set`, `modes.get`, `tools.select`, `response.copy`
+- primitives: `session.bootstrap`, `experience.detect`, `experience.open`, `configuration.inspect`, `configuration.apply`, `work.start`, `work.status`, `work.wait`, `work.steer`, `work.readLatest`, `threads.*`, `messages.*`, `artifacts.*`, `files.preflight`, `files.attach`, `files.downloadLatest`, `projects.sources.list`, `projects.sources.planAdd`, `projects.sources.add`, `modes.set`, `modes.get`, `tools.select`, `response.copy`
+
+`experience.detect` and `configuration.inspect` are non-mutating capability
+discovery. `configuration.apply` is strict by default and must verify the final
+visible state. `work.start` defaults to a fresh task and must not append to a
+loaded task unless the caller explicitly passes `newTask: false`. A partial or
+timeout Work result is recovered through status/wait/read on the same task, not
+by resubmitting the original prompt.
 
 `doctor` returns a normal `CommandResult` whose `data.checks` map is extensible. Scenario checks such as `existing_tab`, `artifacts`, `file_preflight`, `localization`, and `reports` may add optional `code`, `blockerKind`, `nextCommand`, and JSON `details` fields to individual check entries while preserving the existing `status`, `message`, and `remediation` fields.
 
@@ -154,9 +175,16 @@ capability to inventory and bundle the latest non-SVG image asset. This is an
 implementation detail of the TypeScript runtime; the wire command and result
 shape are unchanged.
 
-`files.downloadLatest` preserves the existing file-link behavior and falls back
-to generated-artifact download only when no conventional ChatGPT file affordance
-is visible. Artifact failures are reported as structured blockers such as
+`files.downloadLatest` preserves the existing file-link behavior, recognizes
+filename-labelled buttons in the latest assistant turn, opens ChatGPT's artifact
+preview, and then activates its visible Download control. `filenamePattern` is
+an optional case-insensitive regular expression that prevents a different file
+or image fallback from being accepted as the requested output. When the browser
+bridge exposes only a completed local download `path()`, the runtime copies that
+file into `destDir`; bridges exposing `saveAs()` remain supported. Without a
+filename pattern, the command falls back to generated-artifact download only
+when no conventional ChatGPT file affordance is visible. Artifact failures are
+reported as structured blockers such as
 `artifact_unavailable`, `artifact_selector_drift`, or
 `artifact_download_unavailable`, not protocol errors.
 
@@ -260,7 +288,7 @@ python scripts/live_smoke.py \
   --backend-command "node scripts/http_stdio_relay.mjs"
 ```
 
-The bridge-hosted JS execution must remain active for the duration of the Python smoke. The relay path is:
+Create the backend server and wait on it in the **same** bridge-hosted JS execution. A server created in one Node REPL call cannot be kept bridge-capable by waiting in a second call. That single execution must remain active for the duration of the Python smoke. The relay path is:
 
 ```text
 Python SDK -> stdio relay -> bridge-hosted Node backend -> Codex Chrome bridge -> ChatGPT

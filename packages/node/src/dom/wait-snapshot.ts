@@ -101,43 +101,62 @@ export async function readWaitDomSnapshot(page: PageLike): Promise<WaitDomSnapsh
         && style.opacity !== "0"
         && element.getAttribute("aria-hidden") !== "true";
     };
+    const elementText = (element: HTMLElement) => [
+      element.innerText,
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ].map(normalizeLower).filter(Boolean).join(" ");
     const visibleButtons = Array.from(document.querySelectorAll("button"))
-      .filter((button): button is HTMLButtonElement => isVisible(button as HTMLElement)
-        && (button as HTMLButtonElement).disabled !== true
-        && button.getAttribute("aria-disabled") !== "true");
-    const buttonTexts = visibleButtons
-      .map(button => [
-        button.innerText,
-        button.textContent,
-        button.getAttribute("aria-label"),
-        button.getAttribute("title")
-      ].map(normalizeLower).filter(Boolean).join(" "))
+      .filter((button): button is HTMLButtonElement => isVisible(button as HTMLElement));
+    const activeButtonTexts = visibleButtons
+      .filter(button => button.disabled !== true && button.getAttribute("aria-disabled") !== "true")
+      .map(button => elementText(button))
       .filter(Boolean);
-    // Generation state comes only from visible controls. Answer text may use
-    // "cancel" or "stop" without indicating that ChatGPT is still generating.
-    const haystacks = buttonTexts;
-    const matchingSignals = (phrases: string[]) => haystacks.flatMap(text =>
+    const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
+    const latestTurn = [...turns].reverse().find(turn =>
+      turn.querySelector("[data-message-author-role='assistant']") !== null
+    ) as HTMLElement | undefined;
+    const explicitStatusElements = Array.from(document.querySelectorAll(
+      "[role='status'],[aria-live],[data-testid*='status'],[data-testid*='stopped']"
+    ));
+    const latestTurnUiElements = latestTurn === undefined
+      ? []
+      : Array.from(latestTurn.querySelectorAll("*"));
+    const stoppedUiTexts = [...new Set([...latestTurnUiElements, ...explicitStatusElements]
+      .filter((element): element is HTMLElement => {
+        const htmlElement = element as HTMLElement;
+        const insideMessageProse = typeof htmlElement.closest === "function"
+          && htmlElement.closest("[data-message-author-role]") !== null;
+        const containsMessageProse = typeof htmlElement.querySelector === "function"
+          && htmlElement.querySelector("[data-message-author-role]") !== null;
+        return !insideMessageProse && !containsMessageProse && isVisible(htmlElement);
+      })
+      .map(element => elementText(element))
+      .filter(Boolean))];
+    // Keep active signals on enabled controls, but retain interrupted-response
+    // labels from disabled controls and non-button UI outside assistant prose.
+    const matchingSignals = (texts: string[], phrases: string[]) => texts.flatMap(text =>
       phrases
         .map(phrase => phrase.toLowerCase())
         .filter(phrase => text.includes(phrase))
     );
-    const activeSignals = matchingSignals(args.stop);
-    const stoppedSignals = matchingSignals(args.stopped);
+    const activeSignals = matchingSignals(activeButtonTexts, args.stop);
+    const stoppedSignals = matchingSignals(stoppedUiTexts, args.stopped);
+    const diagnosticTexts = [...activeButtonTexts, ...stoppedUiTexts]
+      .filter(text => [...args.stop, ...args.stopped].some(phrase => text.includes(phrase.toLowerCase())))
+      .map(text => text.slice(0, 160));
     const generation = {
       active: activeSignals.length > 0,
       stopped: stoppedSignals.length > 0,
-      signals: [...new Set([...activeSignals, ...stoppedSignals, ...buttonTexts.filter(text => /stop|cancel|stopped|answering|thinking/i.test(text))])].slice(0, 5)
+      signals: [...new Set([...activeSignals, ...stoppedSignals, ...diagnosticTexts])].slice(0, 5)
     };
 
     // --- Response actions: mirrors dom/generation-state.ts latestAssistantTurnHasResponseActions ---
-    const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
     let hasResponseActions: boolean | undefined;
     if (turns.length === 0) {
       hasResponseActions = undefined;
     } else {
-      const latestTurn = [...turns].reverse().find(turn =>
-        turn.querySelector("[data-message-author-role='assistant']") !== null
-      ) as HTMLElement | undefined;
       if (latestTurn === undefined) {
         hasResponseActions = false;
       } else {

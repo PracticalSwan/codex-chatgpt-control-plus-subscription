@@ -6,9 +6,21 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const pl = {
+  configurationAxes: {
+    effort: ["Nakład pracy"],
+    speed: ["Szybkość"],
+  },
+  configurationOptions: {
+    light: ["Lekki"],
+    medium: ["Średni"],
+    high: ["Wysoki"],
+    extraHigh: ["Bardzo wysoki"],
+    standard: ["Standardowy"],
+    fast: ["Szybki"],
+  },
   composerTextbox: ["Zapytaj o cokolwiek"],
   sendButton: ["Wyślij polecenie"],
   searchChatsButton: ["Szukaj czatów"],
@@ -18,11 +30,11 @@ export const pl = {
   addFilesOpenerCandidates: ["Dodawaj pliki i nie tylko"],
   addPhotosFilesMenuItem: ["Prześlij zdjęcia i pliki"],
   copyResponse: ["Kopiuj odpowiedź"],
-  modeLabels: ["Błyskawiczny", "Średni", "Zaawansowana", "Bardzo wysoki"],
+  modeLabels: ["Błyskawiczny", "Średni", "Zaawansowana", "Bardzo wysoki", "Wysoki"],
   modeOptions: {
     instant: ["Błyskawiczny"],
     medium: ["Średni"],
-    high: ["Zaawansowana"],
+    high: ["Zaawansowana", "Wysoki"],
     extraHigh: ["Bardzo wysoki"],
   },
   modeOpenerExtra: ["Skonfiguruj..."],
@@ -33,4 +45,5 @@ export const pl = {
   },
   signedInMarkers: ["Nowy czat", "Szukaj czatów", "Ostatnie", "Historia czatu", "Projekty", "Zapytaj o cokolwiek"],
   responseActions: ["Kopiuj odpowiedź"],
+  stopControl: ["Przerwij odpowiedź"],
 } satisfies LocaleContribution;

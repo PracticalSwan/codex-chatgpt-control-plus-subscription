@@ -10,8 +10,13 @@ import type {
   AskArgs,
   AskReadData,
   CommandResult,
+  CompletionGate,
+  CompletionGateData,
+  CompletionState,
   ComposeArgs,
   ComposeData,
+  MessageStatusArgs,
+  MessageStatusData,
   PageLike,
   ReadLatestArgs,
   ReadLatestData,
@@ -26,7 +31,7 @@ import { contextFromPage } from "./context.js";
 import { createDeadline } from "./deadline.js";
 import { withCommandOutputText } from "./output.js";
 import { createSingleFlightProbe, type ProbeResult } from "./probes.js";
-import { bootstrap } from "./session.js";
+import { ensurePage } from "./session.js";
 
 export type CompletionSnapshot = {
   textStableForMs: number;
@@ -50,6 +55,12 @@ type SendButtonState = {
   busy?: boolean;
   label?: string;
   reason?: string;
+};
+
+type CompletionGateCache = {
+  targetKey: string;
+  text: string;
+  data: CompletionGateData;
 };
 
 export function isResponseComplete(snapshot: CompletionSnapshot): boolean {
@@ -166,10 +177,21 @@ export async function submitMessage(
 
     if (userTurn === undefined) {
       const latestUser = await readLatestMessage(page, "user", "normalized_text");
+      const generation = await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE);
+      const turnCount = await countPageMessages(page).catch(() => undefined);
       if (submittedUserTurnMatches(latestUser?.text, args.text)) {
         return resultOk(
-          submitData(latestUser?.text, await countPageMessages(page).catch(() => undefined)),
+          submitData(latestUser?.text, turnCount, generation.active ? "submitted_generating" : "submitted", generation),
           await contextFromPage(page)
+        );
+      }
+
+      const turnAdvanced = previousTurnCount !== undefined && turnCount !== undefined && turnCount > previousTurnCount;
+      if (turnAdvanced || generation.active) {
+        return resultOk(
+          submitData(undefined, turnCount, generation.active ? "submitted_generating" : "submitted_unconfirmed", generation),
+          await contextFromPage(page),
+          ["Submitted prompt could not be matched to a rendered user turn yet, but ChatGPT page state indicates progress."]
         );
       }
 
@@ -187,7 +209,12 @@ export async function submitMessage(
     }
 
     return resultOk(
-      submitData(userTurn, await countPageMessages(page).catch(() => undefined)),
+      submitData(
+        userTurn,
+        await countPageMessages(page).catch(() => undefined),
+        "submitted",
+        await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE)
+      ),
       await contextFromPage(page)
     );
   } catch (error) {
@@ -348,6 +375,27 @@ export async function waitForMessage(
   env: RuntimeEnv,
   args: WaitArgs = {}
 ): Promise<CommandResult<WaitData>> {
+  const completionGate = validateCompletionGate(args.completionGate);
+  if (!completionGate.ok) {
+    return {
+      ok: false,
+      status: "error",
+      data: {
+        complete: false,
+        assistantTurnCount: 0,
+        elapsedMs: 0,
+        completionGate: completionGate.data
+      },
+      warnings: [],
+      error: {
+        name: "InvalidCompletionGate",
+        message: completionGate.data.reason,
+        recoverable: false
+      },
+      context: { timestamp: new Date().toISOString() }
+    };
+  }
+
   const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot as CommandResult<WaitData>;
@@ -376,6 +424,8 @@ export async function waitForMessage(
   let lastChangedAt = Date.now();
   let lastObservedTextLength = 0;
   let latestAssistantCount = await countPageMessages(page, "assistant").catch(() => 0);
+  let lastGeneration = EMPTY_GENERATION_STATE;
+  let completionGateCache: CompletionGateCache | undefined;
 
   while (Date.now() - started < timeoutMs) {
     const probeResult = await waitSnapshotProbe(page, deadline, { timeoutMs: probeTimeoutMs });
@@ -397,6 +447,9 @@ export async function waitForMessage(
     if (targetKey !== lastTargetKey) {
       lastTargetKey = targetKey;
       lastChangedAt = Date.now();
+      if (completionGateCache?.targetKey !== targetKey) {
+        completionGateCache = undefined;
+      }
     }
     if (targetReached && snapshot.text.length > 0) {
       lastObservedTextLength = snapshot.text.length;
@@ -417,6 +470,7 @@ export async function waitForMessage(
     pollIndex += 1;
 
     const hasResponseActions = await resolveResponseActions(page, snapshot);
+    lastGeneration = snapshot.generation;
 
     if (targetReached && snapshot.generation.stopped && snapshot.text.length > 0) {
       const stoppedText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
@@ -425,6 +479,12 @@ export async function waitForMessage(
       const data = stoppedText.length > 0
         ? waitDataFromText(args, false, stoppedText, latestAssistantCount, Date.now() - started)
         : waitDataWithoutText(latestAssistantCount, Date.now() - started);
+      if (stoppedText.length > 0 && completionGate.gate !== undefined) {
+        data.completionGate = evaluateCompletionGate(stoppedText, completionGate.gate);
+      }
+      data.completionState = "stopped";
+      data.generationActive = snapshot.generation.active;
+      data.generationSignals = snapshot.generation.signals;
       if (stoppedText.length === 0) {
         waitWarnings.add(`The interrupted assistant text (~${snapshot.text.length} chars observed) could not be re-read at wait exit; call messages.readLatest on the same thread to capture it.`);
       }
@@ -435,6 +495,7 @@ export async function waitForMessage(
         warnings: [
           ...waitWarnings,
           ...(stoppedText.length > 0 ? responseContentWarnings(args, false) : []),
+          ...(data.completionGate === undefined ? [] : completionGateWarnings(data.completionGate)),
           "ChatGPT generation appears to have been stopped or interrupted before completion.",
           ...snapshot.generation.signals.map(signal => `Generation state signal: ${signal}`)
         ],
@@ -451,6 +512,13 @@ export async function waitForMessage(
       && hasResponseActions;
 
     if (metadataComplete) {
+      if (
+        completionGateCache?.targetKey === targetKey
+        && completionGateCache.data.status !== "complete"
+      ) {
+        await sleep(page, pollMs);
+        continue;
+      }
       // Fetch the text once and confirm it still matches the stable snapshot before
       // declaring completion; a hash mismatch means the answer moved on mid-fetch.
       const latestText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
@@ -463,7 +531,19 @@ export async function waitForMessage(
         hasResponseActions
       };
       if (fetchedMetadata.hash === snapshot.text.hash && isResponseComplete(completionSnapshot)) {
+        const gateData = completionGate.gate === undefined
+          ? undefined
+          : evaluateCompletionGate(latestText, completionGate.gate);
+        if (gateData !== undefined && gateData.status !== "complete") {
+          completionGateCache = { targetKey, text: latestText, data: gateData };
+          await sleep(page, pollMs);
+          continue;
+        }
         const data = waitDataFromText(args, true, latestText, latestAssistantCount, Date.now() - started);
+        if (gateData !== undefined) data.completionGate = gateData;
+        data.completionState = "complete" as CompletionState;
+        data.generationActive = false;
+        data.generationSignals = snapshot.generation.signals;
         return withCommandOutputText(resultOk(
           data,
           await contextFromPage(page),
@@ -481,14 +561,30 @@ export async function waitForMessage(
   }
 
   if (lastObservedTextLength > 0) {
-    const partialText = await fetchLatestAssistantText(page);
+    const cachedPartial = completionGateCache?.targetKey === lastTargetKey
+      ? completionGateCache
+      : undefined;
+    const partialText = cachedPartial?.text ?? await fetchLatestAssistantText(page);
     if (partialText !== undefined && normalizeWhitespace(partialText).length > 0) {
-      const data = waitDataFromText(args, false, normalizeWhitespace(partialText), latestAssistantCount, Date.now() - started);
+      const normalizedPartialText = normalizeWhitespace(partialText);
+      const data = waitDataFromText(args, false, normalizedPartialText, latestAssistantCount, Date.now() - started);
+      if (completionGate.gate !== undefined) {
+        data.completionGate = cachedPartial?.data
+          ?? evaluateCompletionGate(normalizedPartialText, completionGate.gate);
+      }
+      data.completionState = completionStateFromGeneration(lastGeneration, false, normalizedPartialText.length > 0);
+      data.generationActive = lastGeneration.active;
+      data.generationSignals = lastGeneration.signals;
       return withCommandOutputText({
         ok: false,
         status: "partial",
         data,
-        warnings: [...waitWarnings, ...responseContentWarnings(args, false), "Timed out after receiving partial assistant text."],
+        warnings: [
+          ...waitWarnings,
+          ...responseContentWarnings(args, false),
+          ...(data.completionGate === undefined ? [] : completionGateWarnings(data.completionGate)),
+          "Timed out after receiving partial assistant text."
+        ],
         context: await contextFromPage(page)
       } satisfies CommandResult<WaitData>);
     }
@@ -616,6 +712,107 @@ function responseContentWarnings(args: WaitArgs, complete: boolean): string[] {
   ];
 }
 
+type ValidatedCompletionGate = Required<CompletionGate>;
+
+function validateCompletionGate(gate: CompletionGate | undefined):
+  | { ok: true; gate?: ValidatedCompletionGate }
+  | { ok: false; data: CompletionGateData } {
+  if (gate === undefined) return { ok: true };
+  if (gate === null || typeof gate !== "object" || Array.isArray(gate)) {
+    return invalidCompletionGate("Completion gate must be an object with start and end boundaries.");
+  }
+  const candidate = gate as Partial<CompletionGate>;
+  if (typeof candidate.start !== "string" || candidate.start.trim().length === 0) {
+    return invalidCompletionGate("Completion gate start must be a non-empty string.");
+  }
+  if (typeof candidate.end !== "string" || candidate.end.trim().length === 0) {
+    return invalidCompletionGate("Completion gate end must be a non-empty string.");
+  }
+  if (candidate.start !== candidate.start.trim() || candidate.end !== candidate.end.trim()) {
+    return invalidCompletionGate("Completion gate boundaries must not contain leading or trailing whitespace.");
+  }
+  if (candidate.start === candidate.end) {
+    return invalidCompletionGate("Completion gate start and end must be distinct.");
+  }
+  if (candidate.start.includes(candidate.end) || candidate.end.includes(candidate.start)) {
+    return invalidCompletionGate("Completion gate boundaries must not contain one another.");
+  }
+  if (candidate.requireUnique !== undefined && typeof candidate.requireUnique !== "boolean") {
+    return invalidCompletionGate("Completion gate requireUnique must be a boolean when provided.");
+  }
+  if (candidate.requireNonEmptyBody !== undefined && typeof candidate.requireNonEmptyBody !== "boolean") {
+    return invalidCompletionGate("Completion gate requireNonEmptyBody must be a boolean when provided.");
+  }
+  return {
+    ok: true,
+    gate: {
+      start: candidate.start,
+      end: candidate.end,
+      requireUnique: candidate.requireUnique ?? true,
+      requireNonEmptyBody: candidate.requireNonEmptyBody ?? true
+    }
+  };
+}
+
+function invalidCompletionGate(reason: string): { ok: false; data: CompletionGateData } {
+  return {
+    ok: false,
+    data: {
+      status: "invalid_boundary",
+      reason
+    }
+  };
+}
+
+function evaluateCompletionGate(text: string, gate: ValidatedCompletionGate): CompletionGateData {
+  const boundedText = text.trim();
+  const startCount = countOccurrences(boundedText, gate.start);
+  const endCount = countOccurrences(boundedText, gate.end);
+  const state = (status: CompletionGateData["status"], reason: string): CompletionGateData => ({
+    status,
+    reason,
+    startCount,
+    endCount
+  });
+
+  if (!boundedText.startsWith(gate.start)) {
+    return state("start_missing", "Assistant text does not begin with the completion gate start boundary.");
+  }
+  if (!boundedText.endsWith(gate.end)) {
+    return state("end_missing", "Assistant text does not end with the completion gate end boundary.");
+  }
+  if (gate.requireUnique && startCount !== 1) {
+    return state("duplicate_start", "Assistant text contains more than one completion gate start boundary.");
+  }
+  if (gate.requireUnique && endCount !== 1) {
+    return state("duplicate_end", "Assistant text contains more than one completion gate end boundary.");
+  }
+  const body = boundedText.slice(gate.start.length, boundedText.length - gate.end.length);
+  if (gate.requireNonEmptyBody && body.trim().length === 0) {
+    return state("empty_body", "Assistant text contains no non-whitespace content between completion gate boundaries.");
+  }
+  return state("complete", "Completion gate boundaries and body are complete.");
+}
+
+function countOccurrences(text: string, marker: string): number {
+  let count = 0;
+  let offset = 0;
+  while (offset <= text.length - marker.length) {
+    const index = text.indexOf(marker, offset);
+    if (index < 0) break;
+    count += 1;
+    offset = index + 1;
+  }
+  return count;
+}
+
+function completionGateWarnings(gate: CompletionGateData): string[] {
+  if (gate.status === "complete") return [];
+  return [
+    `Completion gate is not satisfied (${gate.status}); keep waiting on the same thread without resubmitting. ${gate.reason}`
+  ];
+}
+
 async function pageStateFromProbe(
   probe: Promise<ProbeResult<PageState>>,
   warnings: Set<string>
@@ -675,14 +872,62 @@ export async function readLatest(
   if (latest.actions !== undefined) data.actions = latest.actions;
   if (latest.thoughtDurationText !== undefined) data.thoughtDurationText = latest.thoughtDurationText;
   if (latest.sourcesAvailable !== undefined) data.sourcesAvailable = latest.sourcesAvailable;
+  if (role === "assistant") {
+    const generation = await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE);
+    data.completionState = completionStateFromGeneration(generation, undefined, latest.text.trim().length > 0);
+    data.generationActive = generation.active;
+    data.generationSignals = generation.signals;
+  }
 
   return withCommandOutputText(resultOk(data, await contextFromPage(page), data.warnings ?? []));
+}
+
+export async function messageStatus(
+  env: RuntimeEnv,
+  args: MessageStatusArgs = {}
+): Promise<CommandResult<MessageStatusData>> {
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot as CommandResult<MessageStatusData>;
+  }
+
+  const page = env.page!;
+  // Reuse the combined wait-snapshot evaluate for counts and generation state in a single
+  // round trip; it never carries full assistant text, so a bounded preview is fetched
+  // separately below only when the snapshot proves an assistant turn has text.
+  const snapshot = await readWaitDomSnapshot(page).catch(() => undefined) ?? await fallbackWaitSnapshot(page, 0);
+  const maxPreviewChars = Math.max(0, args.maxPreviewChars ?? 240);
+  const latestText = snapshot.text.length > 0
+    ? normalizeWhitespace(await fetchLatestAssistantText(page) ?? "")
+    : "";
+  const data: MessageStatusData = {
+    turnCount: snapshot.turnCount,
+    assistantTurnCount: snapshot.assistantTurnCount,
+    completionState: completionStateFromGeneration(snapshot.generation, undefined, latestText.length > 0),
+    generationActive: snapshot.generation.active,
+    generationSignals: snapshot.generation.signals
+  };
+  if (snapshot.latestAssistantTurnIndex !== undefined) data.latestAssistantTurnIndex = snapshot.latestAssistantTurnIndex;
+  if (latestText.length > 0) {
+    data.latestAssistantTextLength = latestText.length;
+    data.latestAssistantPreview = latestText.length > maxPreviewChars
+      ? `${latestText.slice(0, Math.max(0, maxPreviewChars - 1))}...`
+      : latestText;
+  }
+
+  return resultOk(data, await contextFromPage(page));
 }
 
 export async function askMessage(
   env: RuntimeEnv,
   args: AskArgs
 ): Promise<CommandResult<AskReadData>> {
+  const normalizedPrompt = normalizeAskPrompt(args);
+  if (!normalizedPrompt.ok) {
+    return normalizedPrompt.result;
+  }
+  const prompt = normalizedPrompt.text;
+
   const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot as CommandResult<AskReadData>;
@@ -691,7 +936,7 @@ export async function askMessage(
   const page = env.page!;
   const beforeTurnCount = await countPageMessages(page).catch(() => undefined);
   const beforeAssistantTurnCount = await countPageMessages(page, "assistant").catch(() => undefined);
-  const composeArgs: ComposeArgs = { text: args.text, mode: "replace" };
+  const composeArgs: ComposeArgs = { text: prompt, mode: "replace" };
   if (args.timeoutMs !== undefined) {
     composeArgs.timeoutMs = args.timeoutMs;
   }
@@ -700,7 +945,7 @@ export async function askMessage(
     return forwardFailure(compose);
   }
 
-  const submitArgs: SubmitArgs = { text: args.text };
+  const submitArgs: SubmitArgs = { text: prompt };
   if (beforeTurnCount !== undefined) {
     submitArgs.previousTurnCount = beforeTurnCount;
   }
@@ -762,7 +1007,7 @@ export async function askMessage(
   }
 
   const state = await readPageState(page).catch(() => undefined);
-  const data: AskReadData = { prompt: args.text };
+  const data: AskReadData = { prompt };
   const complete = waitResult?.data?.complete ?? (waitResult === undefined ? undefined : false);
   if (complete !== undefined) {
     data.complete = complete;
@@ -776,6 +1021,7 @@ export async function askMessage(
   if (state?.title !== undefined) {
     data.title = state.title;
   }
+  applyMessageState(data, submit.data, waitResult?.data);
 
   if (waitFailure !== undefined) {
     data.complete = false;
@@ -821,7 +1067,7 @@ export async function waitAndRead(
     return forwardFailure(read);
   }
 
-  const data = askReadData("", read.data?.text, wait.data?.complete);
+  const data = askReadData("", read.data?.text, wait.data?.complete, wait.data, read.data);
   const warnings = [...read.warnings, ...wait.warnings];
   if (!wait.ok && wait.status === "partial") {
     data.complete = false;
@@ -838,13 +1084,6 @@ export async function waitAndRead(
   }
 
   return withCommandOutputText(resultOk(data, read.context, warnings));
-}
-
-async function ensurePage(env: RuntimeEnv): Promise<CommandResult<unknown>> {
-  if (env.page !== undefined) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
 }
 
 async function waitForSubmittedUserTurn(
@@ -993,7 +1232,12 @@ async function sleep(page: PageLike, ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function submitData(userTurnText: string | undefined, turnCount: number | undefined): SubmitData {
+function submitData(
+  userTurnText: string | undefined,
+  turnCount: number | undefined,
+  submissionState: NonNullable<SubmitData["submissionState"]>,
+  generation: AssistantGenerationState
+): SubmitData {
   const data: SubmitData = { submitted: true };
   if (userTurnText !== undefined) {
     data.userTurnText = userTurnText;
@@ -1001,10 +1245,20 @@ function submitData(userTurnText: string | undefined, turnCount: number | undefi
   if (turnCount !== undefined) {
     data.turnCount = turnCount;
   }
+  data.submissionState = submissionState;
+  data.completionState = completionStateFromGeneration(generation);
+  data.generationActive = generation.active;
+  data.generationSignals = generation.signals;
   return data;
 }
 
-function askReadData(prompt: string, responseText: string | undefined, complete: boolean | undefined): AskReadData {
+function askReadData(
+  prompt: string,
+  responseText: string | undefined,
+  complete: boolean | undefined,
+  wait?: WaitData,
+  read?: ReadLatestData
+): AskReadData {
   const data: AskReadData = { prompt };
   if (responseText !== undefined) {
     data.responseText = responseText;
@@ -1012,7 +1266,76 @@ function askReadData(prompt: string, responseText: string | undefined, complete:
   if (complete !== undefined) {
     data.complete = complete;
   }
+  applyMessageState(data, undefined, wait, read);
   return data;
+}
+
+function applyMessageState(
+  data: AskReadData,
+  submit?: SubmitData,
+  wait?: WaitData,
+  read?: ReadLatestData
+): void {
+  if (submit?.submissionState !== undefined) data.submissionState = submit.submissionState;
+  const completionState = wait?.completionState ?? read?.completionState ?? submit?.completionState;
+  if (completionState !== undefined) data.completionState = completionState;
+  const generationActive = wait?.generationActive ?? read?.generationActive ?? submit?.generationActive;
+  if (generationActive !== undefined) data.generationActive = generationActive;
+  const generationSignals = wait?.generationSignals ?? read?.generationSignals ?? submit?.generationSignals;
+  if (generationSignals !== undefined) data.generationSignals = generationSignals;
+}
+
+function completionStateFromGeneration(
+  generation: AssistantGenerationState,
+  complete?: boolean,
+  hasPartialText = false
+): CompletionState {
+  if (complete === true) return "complete";
+  if (generation.active) return "generating";
+  if (generation.stopped) return "stopped";
+  if (complete === false || hasPartialText) return "partial";
+  return "unknown";
+}
+
+function normalizeAskPrompt(args: AskArgs):
+  | { ok: true; text: string }
+  | { ok: false; result: CommandResult<AskReadData> } {
+  const text = args.text;
+  const prompt = args.prompt;
+  if (text !== undefined && prompt !== undefined && text !== prompt) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        status: "error",
+        warnings: [],
+        error: {
+          name: "InvalidAskArgs",
+          message: "messages.ask received both text and prompt with different values.",
+          recoverable: false
+        },
+        context: { timestamp: new Date().toISOString() }
+      }
+    };
+  }
+  const normalized = text ?? prompt;
+  if (normalized === undefined || normalized.trim().length === 0) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        status: "error",
+        warnings: [],
+        error: {
+          name: "InvalidAskArgs",
+          message: "messages.ask requires a non-empty text or prompt argument.",
+          recoverable: false
+        },
+        context: { timestamp: new Date().toISOString() }
+      }
+    };
+  }
+  return { ok: true, text: normalized };
 }
 
 function readRole(read: AskArgs["read"]): ReadLatestArgs["role"] | undefined {

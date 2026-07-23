@@ -1,7 +1,7 @@
 {
   "name": "codex-chatgpt-control",
-  "version": "0.3.0-alpha.2+codex.20260713.1",
-  "description": "Use visible ChatGPT web from Codex for threads, files, GPT-5.6 Sol High consultation, response capture, and safe blocker reporting.",
+  "version": "0.5.1-alpha.1+codex.20260723-1",
+  "description": "Control visible ChatGPT Chat and Work from Codex with verified configuration, GPT-5.6 Sol High consultation, files, artifacts, and safe blockers.",
   "author": {
     "name": "PracticalSwan",
     "url": "https://github.com/PracticalSwan"
@@ -15,15 +15,17 @@
     "browser",
     "visible-ui",
     "agents",
+    "surface-control",
+    "work-tasks",
     "plus",
     "gpt-5-6-sol",
     "high-intelligence"
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "ChatGPT Control for Codex",
-    "shortDescription": "Use visible ChatGPT web from Codex for threads, files, GPT-5.6 Sol High review, response capture, and blockers",
-    "longDescription": "ChatGPT Control for Codex lets Codex agents work with the ChatGPT web product the user can see. It supports user-directed prompts, thread reuse, file attachments, visible downloads, Markdown response capture, redacted reports, GPT-5.6 Sol High Intelligence consultation workflows for ChatGPT Plus, and structured blockers for login, captcha, permissions, selector drift, rate limits, and missing browser bridge state. It does not bypass ChatGPT login, call hidden endpoints, read cookies, or replace the OpenAI API.",
+    "displayName": "ChatGPT Surface Control",
+    "shortDescription": "Delegate to visible ChatGPT Chat or Work with verified controls, GPT-5.6 Sol High review, files, and artifacts",
+    "longDescription": "ChatGPT Surface Control lets Codex agents work with the visible ChatGPT Chat and Work experiences. It supports surface detection, verified configuration, user-directed prompts, thread and Work-task continuation, progress polling, steering, file attachments, visible artifacts and downloads, response capture, redacted reports, and strict GPT-5.6 Sol High Intelligence consultation workflows for ChatGPT Plus. It does not bypass ChatGPT login, call hidden endpoints, read cookies, fall back to Pro for focused consultations, or replace the OpenAI API or official Codex SDK.",
     "developerName": "PracticalSwan",
     "category": "Developer Tools",
     "capabilities": [
@@ -35,9 +37,9 @@
     "privacyPolicyURL": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/blob/main/docs/plugin-privacy.md",
     "termsOfServiceURL": "https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription/blob/main/docs/plugin-terms.md",
     "defaultPrompt": [
-      "Use GPT-5.6 Sol at High Intelligence to critique this plan.",
-      "Continue the ChatGPT thread open in Chrome.",
-      "Diagnose ChatGPT file upload from Codex."
+      "Use GPT-5.6 Sol at High Intelligence to critique this plan and capture the complete gated reply.",
+      "Start a visible Work task and report progress without duplicate submission.",
+      "Continue the ChatGPT thread open in Chrome."
     ],
     "brandColor": "#10A37F",
     "composerIcon": "./assets/composer-icon.png",

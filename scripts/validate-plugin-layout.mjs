@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,8 +93,12 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = detectRoot(args.root);
   const pluginRoot = path.join(root, "plugins/codex-chatgpt-control");
+  const releaseCanary = path.join(pluginRoot, "runtime/node/codex-chatgpt-control-release-canary.bundle.mjs");
   const marketplacePath = path.join(root, ".agents/plugins/marketplace.json");
   const manifestPath = path.join(pluginRoot, ".codex-plugin/plugin.json");
+  const releasePackagePath = existsSync(path.join(root, "tools/public-export/root/package.json"))
+    ? path.join(root, "tools/public-export/root/package.json")
+    : path.join(root, "package.json");
 
   const requiredFiles = [
     marketplacePath,
@@ -103,23 +108,20 @@ async function main() {
     path.join(pluginRoot, "runtime/node/codex-chatgpt-control.bundle.mjs"),
     path.join(pluginRoot, "runtime/node/codex-chatgpt-control-backend.mjs"),
     path.join(pluginRoot, "runtime/node/codex-chatgpt-control-live-smoke.bundle.mjs"),
+    path.join(pluginRoot, "runtime/node/codex-chatgpt-control-release-canary.bundle.mjs"),
     path.join(pluginRoot, "skills/codex-chatgpt-control/SKILL.md"),
+    path.join(pluginRoot, "skills/chatgpt-delegate/SKILL.md"),
     path.join(pluginRoot, "skills/chatgpt-gpt-5-6-high-consult/SKILL.md")
   ];
   for (const file of requiredFiles) {
     assert(existsSync(file), `Missing required plugin file: ${path.relative(root, file)}`);
   }
 
-  const expectedSkillDirectories = ["chatgpt-gpt-5-6-high-consult", "codex-chatgpt-control"];
-  const skillDirectories = (await readdir(path.join(pluginRoot, "skills"), { withFileTypes: true }))
-    .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
-    .sort();
-  assert(
-    skillDirectories.length === expectedSkillDirectories.length
-      && skillDirectories.every((name, index) => name === expectedSkillDirectories[index]),
-    `Plugin must expose exactly these bundled skills: ${expectedSkillDirectories.join(", ")}`
-  );
+  execFileSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `process.argv = undefined; await import(${JSON.stringify(pathToFileURL(releaseCanary).href)});`
+  ], { stdio: "pipe" });
 
   const marketplace = await readJson(marketplacePath);
   assert(marketplace.name === "codex-chatgpt-control", "Marketplace name must be codex-chatgpt-control");
@@ -130,7 +132,11 @@ async function main() {
   assert(entry.policy?.authentication === "ON_INSTALL", "Marketplace authentication policy must be ON_INSTALL");
 
   const manifest = await readJson(manifestPath);
+  const releasePackage = await readJson(releasePackagePath);
   assert(manifest.name === "codex-chatgpt-control", "Plugin manifest name mismatch");
+  assert(typeof manifest.version === "string", "Plugin manifest version must be a string");
+  assert(manifest.version.split("+", 1)[0] === releasePackage.version, "Plugin base version must match the release package version");
+  assert(/^\d+\.\d+\.\d+-(?:alpha|beta|rc)\.\d+\+codex\.[a-z0-9-]+$/.test(manifest.version), "Plugin version must contain exactly one +codex.<cachebuster> suffix");
   assert(manifest.skills === "./skills/", "Plugin manifest must point at ./skills/");
   assert(!manifest.mcpServers, "V1 plugin must not declare MCP servers");
   assert(!manifest.apps, "V1 plugin must not declare apps");
@@ -138,13 +144,42 @@ async function main() {
   await assertReferencedAsset(pluginRoot, manifest.interface?.logo, "Plugin logo", 256);
   await assertReferencedAsset(pluginRoot, manifest.interface?.composerIcon, "Plugin composerIcon", 64);
 
-  const broadSkill = await readFile(path.join(pluginRoot, "skills/codex-chatgpt-control/SKILL.md"), "utf8");
-  const consultSkill = await readFile(path.join(pluginRoot, "skills/chatgpt-gpt-5-6-high-consult/SKILL.md"), "utf8");
+  const skillRoot = path.join(pluginRoot, "skills");
+  const expectedSkills = ["chatgpt-delegate", "chatgpt-gpt-5-6-high-consult", "codex-chatgpt-control"];
+  const actualSkills = (await readdir(skillRoot, { withFileTypes: true }))
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .sort();
+  assert(JSON.stringify(actualSkills) === JSON.stringify(expectedSkills), `Plugin skill inventory mismatch: ${actualSkills.join(", ")}`);
+
+  const broadSkill = await readFile(path.join(skillRoot, "codex-chatgpt-control/SKILL.md"), "utf8");
+  const delegateSkill = await readFile(path.join(skillRoot, "chatgpt-delegate/SKILL.md"), "utf8");
+  const consultSkill = await readFile(path.join(skillRoot, "chatgpt-gpt-5-6-high-consult/SKILL.md"), "utf8");
+  validateSkillFrontmatter(broadSkill, "codex-chatgpt-control");
+  validateSkillFrontmatter(delegateSkill, "chatgpt-delegate");
+  validateSkillFrontmatter(consultSkill, "chatgpt-gpt-5-6-high-consult");
   assert(broadSkill.includes("name: codex-chatgpt-control"), "Broad skill frontmatter missing name");
+  assert(delegateSkill.includes("name: chatgpt-delegate"), "Delegate skill frontmatter missing name");
   assert(consultSkill.includes("name: chatgpt-gpt-5-6-high-consult"), "GPT-5.6 Sol High skill frontmatter missing name");
   assert(broadSkill.includes("../../runtime/import-chatgpt-control.mjs"), "Broad skill must use plugin runtime loader");
+  assert(delegateSkill.includes("../../runtime/import-chatgpt-control.mjs"), "Delegate skill must use plugin runtime loader");
   assert(consultSkill.includes("../../runtime/import-chatgpt-control.mjs"), "GPT-5.6 Sol High skill must use plugin runtime loader");
   assert(!consultSkill.includes("~/.codex/skills/"), "GPT-5.6 Sol High skill must not depend on an installed skill runtime");
+  assert(consultSkill.includes('model: "GPT-5.6 Sol"'), "GPT-5.6 Sol High skill must pin GPT-5.6 Sol");
+  assert(consultSkill.includes('intelligence: "High"'), "GPT-5.6 Sol High skill must pin High Intelligence");
+  assert(consultSkill.includes("Do not select or fall back to Pro."), "GPT-5.6 Sol High skill must forbid Pro fallback");
+  assert(consultSkill.includes('const START_GATE = "<Start>"'), "GPT-5.6 Sol High skill must define the strict start gate");
+  assert(consultSkill.includes('const END_GATE = "<End>"'), "GPT-5.6 Sol High skill must define the strict end gate");
+  assert(consultSkill.includes("completionGate: COMPLETION_GATE"), "GPT-5.6 Sol High skill must pass its gate to messages.wait");
+  assert(consultSkill.includes("const RECOVERY_DELAY_MS = 8_000"), "GPT-5.6 Sol High skill must retain a deliberate recovery delay");
+  assert(consultSkill.includes("(?!WEB:)"), "GPT-5.6 Sol High skill must reject provisional WEB thread URLs during recovery");
+  assert(consultSkill.includes("afterAssistantTurnCount") && consultSkill.includes("afterTurnCount"), "GPT-5.6 Sol High skill must retain both pre-submit turn baselines");
+  assert(consultSkill.includes("recoveryTabId"), "GPT-5.6 Sol High skill must retain the exact claimed tab for pre-canonical runtime recovery");
+  assert(consultSkill.includes('target: { type: "tabId", tabId: recoveryTabId }'), "GPT-5.6 Sol High skill must reclaim only the exact submitted tab after a pre-canonical runtime failure");
+  assert(consultSkill.includes("Never call `messages.compose` or `messages.submit` during recovery."), "GPT-5.6 Sol High skill must forbid recovery resubmission");
+
+  const agentMetadata = await readFile(path.join(pluginRoot, "agents/openai.yaml"), "utf8");
+  assert(agentMetadata.includes('$chatgpt-gpt-5-6-high-consult'), "agents/openai.yaml default_prompt must explicitly invoke $chatgpt-gpt-5-6-high-consult");
 
   const pluginFiles = await listTextFiles(pluginRoot);
   for (const file of pluginFiles) {
@@ -153,6 +188,19 @@ async function main() {
   }
 
   console.log(`Plugin layout is valid at ${pluginRoot}`);
+}
+
+function validateSkillFrontmatter(text, expectedName) {
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  assert(match, `${expectedName} skill must begin with YAML frontmatter`);
+  const frontmatter = match[1];
+  const rootKeys = frontmatter.split(/\r?\n/)
+    .filter(line => /^[A-Za-z][A-Za-z0-9_-]*\s*:/.test(line))
+    .map(line => line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:/)?.[1])
+    .filter(Boolean);
+  assert(JSON.stringify(rootKeys.sort()) === JSON.stringify(["description", "name"]), `${expectedName} skill frontmatter may contain only name and description`);
+  assert(new RegExp(`^name:\\s*${expectedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(frontmatter), `${expectedName} skill frontmatter name mismatch`);
+  assert(/^description:\s*\S.+$/m.test(frontmatter), `${expectedName} skill frontmatter requires a non-empty description`);
 }
 
 main().catch(error => {

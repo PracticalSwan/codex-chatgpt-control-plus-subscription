@@ -26,10 +26,19 @@ Wire fields stay TypeScript-compatible. Python exposes idiomatic aliases:
 | `totalBytes` | `total_bytes` |
 | `projectUrl` | `project_url` |
 | `displayPath` | `display_path` |
+| `selectorProfile` | `selector_profile` |
+| `newTask` | `new_task` |
+| `includeArtifacts` | `include_artifacts` |
 
 Incomplete response capture is also shared contract behavior. Python must preserve `status == "partial"`, `output_text`, warnings, and any nested `data.captureLimit` dictionaries exactly as the TypeScript backend returns them. `partial` is not a protocol error: callers should inspect `data.complete` and run another wait/read on the same thread when they need final output.
 
 For long-answer polling, Python forwards `response_content="metadata"` to the shared wire field `responseContent: "metadata"` on `messages.wait`. The TypeScript backend then omits assistant text from wait results and returns compact metadata such as `data.responseChars` and `data.responseSha256`; Python must preserve those fields without trying to reconstruct omitted content.
+
+Python also forwards `completion_gate` to `completionGate`. Known nested policy
+keys map from `require_unique` and `require_non_empty_body` to `requireUnique`
+and `requireNonEmptyBody`; `start` and `end` remain unchanged. Gate evaluation,
+turn-baseline checks, and `InvalidCompletionGate` errors remain owned by the
+TypeScript backend.
 
 Generated-image behavior stays owned by the TypeScript runtime. Python exposes
 the same backend commands through `chatgpt.artifacts.list_latest(...)`,
@@ -40,6 +49,13 @@ If the TypeScript runtime recovers a generated image by reopening a stalled
 claimed conversation in a temporary bridge-owned tab and exporting through
 `pageAssets`, Python observes the same command result through the backend
 protocol without any Python-side browser logic.
+
+Chat/Work behavior follows the same authority boundary. Python exposes matching
+sync and async `experience`, `configuration`, and `work` groups, but surface
+detection, selector profiles, configuration state machines, submit-once Work
+semantics, and artifact extraction remain owned by TypeScript. Nested Python
+dictionaries and model instances are recursively converted from snake_case to
+the camelCase wire contract.
 
 Blocker explainability follows the same rule. TypeScript owns blocker creation,
 runner interruption decisions, and existing-tab diagnostics. Python exposes
@@ -123,7 +139,7 @@ Report results may include `metaPath` plus `integrity` metadata. Python exposes 
 
 ## Streaming
 
-`stream-*.ndjson` fixtures are milestone streams. They are not token streams. The final `completed` event contains a normal `ChatGPTRunResult` wire object, including blockers when the run cannot proceed.
+`stream-*.ndjson` fixtures are milestone streams. They are not token streams. The final `completed` event contains a normal `ChatGPTRunResult` wire object, including blockers when the run cannot proceed. Running partial assistant text uses `message.in_progress` / `message_in_progress`; completion-confirmed assistant output uses `message.completed` / `message_completed`.
 
 ```python
 from codex_chatgpt_control import ChatGPTStreamEvent
@@ -215,7 +231,7 @@ python scripts/live_smoke.py \
   --backend-command "node scripts/http_stdio_relay.mjs"
 ```
 
-Keep the bridge-hosted JS execution active while Python runs. If that JS execution returns first, the browser client no longer has an active execution context and operations can fail with `node_repl exec context not found`.
+Create the backend server and wait on it in the **same** bridge-hosted JS execution. Starting the server in one Node REPL call and trying to keep it alive with a second call does not preserve the first call's browser execution context. Keep that single execution active while Python runs. If it returns first, the browser client no longer has an active execution context and operations can fail with `node_repl exec context not found`.
 
 This is the intended live test chain:
 

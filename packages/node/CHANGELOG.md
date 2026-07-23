@@ -1,8 +1,35 @@
 # Changelog
 
-- Treat the current GPT-5.6 Sol Plus picker state as verified when `modes.set`
-  selected both `GPT-5.6 Sol` and `High`, even when the composer keeps only
-  `High` visible afterward.
+## 0.5.1-alpha.1
+
+- Adds an optional strict `completionGate` to `messages.wait`; configured
+  start/end boundaries, uniqueness, and non-empty-body policy must pass before
+  the normal completion predicate can succeed.
+- Returns structured completion-gate status while keeping metadata-only waits
+  redacted and preserving the original total/assistant turn baselines.
+- Reads long `visible_text` and `normalized_text` directly from the semantic
+  DOM message node, avoiding HTML-serialization clipping during final gate
+  validation.
+- Caches an incomplete gate evaluation until the response length/hash changes,
+  avoiding repeated full-text bridge transfers during long recovery windows.
+- Detects stopped-generation labels in disabled and non-button latest-turn or
+  status UI while excluding assistant message prose from state signals.
+- Locks transitive `fast-uri` 3.1.4 to clear the current high-severity
+  development-dependency audit findings.
+- Fixes current Chat/Work switching through the visible surface-radio group and
+  preserves older selector fallbacks.
+- Correctly identifies checked Work home state, active Work tasks, and the
+  current compound Work configuration opener.
+- Adds reusable live-smoke coverage for Chat/Work routing, strict configuration
+  verification, Work start/status/wait/read/steer/artifacts, and Work-backed
+  Runner and Responses paths.
+
+## 0.5.0-alpha.1
+
+- Adds `experience.detect/open`, `configuration.inspect/apply`, and the Work task lifecycle command group.
+- Adds scoped Chat/Work selector profiles, strict configuration postcondition verification, and sanitized profile fixtures.
+- Adds runner/Responses experience and configuration inputs plus milestone events.
+- Preserves existing `mode`, `modes.set/get`, commands, package imports, and wire fields for backward compatibility.
 
 ## 0.3.0-alpha.1
 

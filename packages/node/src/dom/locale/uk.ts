@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const uk = {
+  configurationAxes: {
+    model: ["Модель"],
+    effort: ["Зусилля"],
+    speed: ["Швидкість"],
+  },
+  configurationOptions: {
+    light: ["Низький"],
+    medium: ["Середній"],
+    high: ["Високий"],
+    extraHigh: ["Найвищий"],
+    standard: ["Стандартний"],
+    fast: ["Швидка"],
+  },
   composerTextbox: ["Запитайте будь-що"],
   sendButton: ["Надіслати запит"],
   searchChatsButton: ["Пошук чатів"],
@@ -18,12 +31,12 @@ export const uk = {
   addFilesOpenerCandidates: ["Додавайте файли й виконуйте інші дії"],
   addPhotosFilesMenuItem: ["Додати світлини та файли"],
   copyResponse: ["Копіювати відповідь"],
-  modeLabels: ["Миттєвий", "Середній", "Високий", "Дуже високий"],
+  modeLabels: ["Миттєвий", "Середній", "Високий", "Дуже високий", "Найвищий"],
   modeOptions: {
     instant: ["Миттєвий"],
     medium: ["Середній"],
     high: ["Високий"],
-    extraHigh: ["Дуже високий"],
+    extraHigh: ["Дуже високий", "Найвищий"],
   },
   modeOpenerExtra: ["Налаштувати…"],
   tools: {
@@ -33,4 +46,5 @@ export const uk = {
   },
   signedInMarkers: ["Новий чат", "Пошук чатів", "Нещодавні", "Історія чатів", "Проєкти", "Запитайте будь-що"],
   responseActions: ["Копіювати відповідь"],
+  stopControl: ["Зупинити відповідь"],
 } satisfies LocaleContribution;

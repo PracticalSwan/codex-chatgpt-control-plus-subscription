@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const ka = {
+  configurationAxes: {
+    model: ["მოდელი"],
+    effort: ["ძალისხმევა"],
+    speed: ["სიჩქარე"],
+  },
+  configurationOptions: {
+    light: ["მსუბუქი"],
+    medium: ["საშუალო"],
+    high: ["მაღალი"],
+    extraHigh: ["ძალიან მაღალი"],
+    standard: ["სტანდარტული"],
+    fast: ["სწრაფი"],
+  },
   composerTextbox: ["საუბარი ChatGPT-სთან"],
   sendButton: ["მოთხოვნის გაგზავნა"],
   searchChatsButton: ["ჩატების ძიება"],
@@ -33,4 +46,5 @@ export const ka = {
   },
   signedInMarkers: ["ახალი ჩატი", "ჩატების ძიება", "ბოლოდროინდელი", "ჩატის ისტორია", "პროექტები", "საუბარი ChatGPT-სთან"],
   responseActions: ["პასუხის კოპირება"],
+  stopControl: ["პასუხის შეწყვეტა"],
 } satisfies LocaleContribution;

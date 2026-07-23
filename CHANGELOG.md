@@ -1,17 +1,50 @@
 # Changelog
 
-## 0.3.0-alpha.2
+## 0.5.1-alpha.1
 
-- Replaces the focused Pro consultation skill with
-  `chatgpt-gpt-5-6-high-consult`, targeting visible ChatGPT Plus sessions with
-  GPT-5.6 Sol at High Intelligence and no Pro fallback.
-- Documents primitive-only submission, bounded metadata polling, and exact
-  thread recovery after polling or browser-runtime timeouts without prompt
-  resubmission.
-- Prevents assistant prose containing stop/cancel words from being interpreted
-  as a live generation control, and skips timed-out single-flight snapshot
-  polls without resetting response stability.
-- Makes plugin runtime builds work from Windows by invoking `npm.cmd`.
+- Merges the upstream 0.5.1 Chat/Work surface, lifecycle, artifact, contract,
+  packaging, and live-qualification updates into this fork.
+- Adds optional strict response completion gates to `messages.wait`, including
+  structured missing, duplicate, empty, invalid, and complete statuses.
+- Hardens the focused GPT-5.6 Sol High consultation with exact `<Start>` and
+  `<End>` boundaries, delayed same-thread recovery, original turn baselines,
+  pre-canonical exact-tab recovery, unclipped visible-text validation, and no
+  Pro fallback or resubmission.
+- Caches an unchanged incomplete gate result by response length/hash so long
+  partial replies cross the browser bridge only after their visible text
+  changes.
+- Retains stopped-generation labels from disabled or non-button status UI
+  while excluding assistant prose from generation-state signals.
+- Guards inherited registry and GitHub release jobs to the canonical upstream
+  repository so fork tags cannot publish upstream-owned package coordinates.
+- Captures long visible and normalized response text directly from the
+  semantic message node instead of relying on potentially clipped HTML
+  serialization.
+- Updates the contract validator's transitive `fast-uri` lock entry to 3.1.4
+  so the shipped development tree passes the high-severity dependency audit.
+- Fixes current Chat/Work pane switching by selecting the visible
+  `Select chat surface` radios while retaining legacy button, menu-item, tab,
+  link, and bounded DOM fallbacks.
+- Correctly detects the checked Work pane and active Work tasks whose home
+  surface radio is no longer visible.
+- Expands reusable live qualification to cover explicit Chat/Work round trips,
+  strict no-op configuration verification, the complete Work lifecycle,
+  Work-backed Runner and Responses calls, artifact enumeration, and safe Chat
+  restoration.
+- Upgrades all bundled skills and plugin packaging validation, and adds an
+  opt-in Work configuration mutation test that restores the original setting.
+
+## 0.5.0-alpha.1
+
+- Adds first-class Chat/Work experience detection and verified surface switching.
+- Adds surface-aware `configuration.inspect` and strict `configuration.apply` for Chat intelligence/model controls and Work model/effort/speed axes.
+- Adds submit-once Work lifecycle commands for start, status, wait, steering, response capture, and artifact access.
+- Adds sanitized legacy Chat, simplified Chat, Work basic, Work advanced, and sidebar false-positive profile fixtures to the shared Node/Python conformance suite.
+- Adds sync and async Python parity, recursive snake-case wire conversion, runner/Responses support, and Work artifact aliases.
+- Rebrands the plugin promise to ChatGPT Surface Control and adds
+  `chatgpt-delegate`; package coordinates and legacy mode APIs remain
+  compatible. This fork bundles its Sol High focused consultation in the same
+  plugin.
 
 ## 0.3.0-alpha.1
 

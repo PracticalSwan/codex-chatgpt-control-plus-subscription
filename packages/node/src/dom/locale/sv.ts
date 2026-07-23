@@ -6,9 +6,21 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const sv = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["Resonemangsnivå"],
+    speed: ["Hastighet"],
+  },
+  configurationOptions: {
+    light: ["Låg"],
+    medium: ["Balanserad"],
+    high: ["Hög"],
+    extraHigh: ["Extra hög"],
+    fast: ["Snabb"],
+  },
   composerTextbox: ["Fråga vad som helst"],
   sendButton: ["Skicka prompt"],
   searchChatsButton: ["Sök i chattar"],
@@ -33,4 +45,5 @@ export const sv = {
   },
   signedInMarkers: ["Ny chatt", "Sök i chattar", "Senaste", "Chatthistorik", "Projekt", "Fråga vad som helst"],
   responseActions: ["Kopiera svar"],
+  stopControl: ["Sluta svara"],
 } satisfies LocaleContribution;

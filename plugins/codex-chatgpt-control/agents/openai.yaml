@@ -1,5 +1,5 @@
 interface:
-  display_name: "ChatGPT Control for Codex"
-  short_description: "Visible ChatGPT web workflows for Codex"
+  display_name: "ChatGPT Surface Control"
+  short_description: "Visible Chat and Work control with GPT-5.6 Sol High consultation"
   brand_color: "#10A37F"
-  default_prompt: "Use ChatGPT Control for Codex to ask GPT-5.6 Sol at High Intelligence to critique this plan."
+  default_prompt: "Use $chatgpt-gpt-5-6-high-consult with GPT-5.6 Sol at High Intelligence to critique this plan and capture its complete gated reply."

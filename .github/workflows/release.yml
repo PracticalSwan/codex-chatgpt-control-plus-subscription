@@ -14,15 +14,15 @@ concurrency:
 
 jobs:
   preflight:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
     name: release preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          package-manager-cache: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -49,21 +49,44 @@ jobs:
           npm run release:build-python
           npm run release:check-python
 
-  publish-npm:
-    name: publish npm
+  package-smoke-macos:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
+    name: release package smoke (macos-latest)
     needs: preflight
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/node/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: npm --prefix packages/node ci
+      - run: python -m pip install --upgrade build
+      - run: npm run node:build
+      - run: npm run node:bundle
+      - run: npm run release:check-node-pack
+      - run: npm run release:smoke-source
+
+  publish-npm:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
+    name: publish npm
+    needs: [preflight, package-smoke-macos]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
       - run: npm --prefix packages/node ci
       - run: npm run release:check-version
       - run: npm run node:build
@@ -74,20 +97,20 @@ jobs:
         run: npm publish --provenance --access public --tag next
 
   publish-pypi:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
     name: publish PyPI
-    needs: preflight
+    needs: [preflight, package-smoke-macos]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          package-manager-cache: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -102,3 +125,38 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/python
+
+  verify-published:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
+    name: verify published registry installs
+    needs: [publish-npm, publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm run release:verify-published
+
+  github-release:
+    if: github.repository == 'adamallcock/codex-chatgpt-control'
+    name: publish GitHub prerelease
+    needs: verify-published
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish release notes for the verified tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          --repo "${GITHUB_REPOSITORY}"
+          --verify-tag
+          --prerelease
+          --generate-notes
+          --title "ChatGPT Surface Control ${GITHUB_REF_NAME#v}"

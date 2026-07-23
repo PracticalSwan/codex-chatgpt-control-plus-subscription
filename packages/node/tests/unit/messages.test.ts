@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { askMessage, isResponseComplete, readLatest, submittedUserTurnMatches, submitMessage, waitForMessage } from "../../src/commands/messages.js";
+import { askMessage, isResponseComplete, messageStatus, readLatest, submittedUserTurnMatches, submitMessage, waitForMessage } from "../../src/commands/messages.js";
 import { waitTextMetadata } from "../../src/dom/wait-snapshot.js";
 import { copyResponse } from "../../src/commands/response-actions.js";
-import { EMPTY_GENERATION_STATE } from "../../src/dom/generation-state.js";
+import { EMPTY_GENERATION_STATE, readAssistantGenerationState } from "../../src/dom/generation-state.js";
+import { localeLabels } from "../../src/dom/locale-labels.js";
 import {
   countMessages,
   extractMessagesFromHtml,
@@ -34,6 +35,57 @@ describe("extractMessagesFromHtml", () => {
       { role: "assistant", text: "hi", format: "markdown", markdown: "hi" }
     ]);
     expect(messages[0]?.actions).toBeUndefined();
+  });
+
+  it("detects localized active generation labels from the locale registry", async () => {
+    const label = "Controle QA localise";
+    localeLabels.stopControl.push(label);
+    try {
+      const state = await readAssistantGenerationState(contentPage(`<button aria-label="${label}"></button>`));
+
+      expect(state).toMatchObject({
+        active: true,
+        stopped: false,
+        signals: [label]
+      });
+    } finally {
+      localeLabels.stopControl.splice(localeLabels.stopControl.indexOf(label), 1);
+    }
+  });
+
+  it("detects localized stopped generation labels from the locale registry", async () => {
+    localeLabels.stoppedAssistant.push("Réflexion arrêtée");
+    try {
+      const state = await readAssistantGenerationState(contentPage("<main>Réflexion arrêtée</main>"));
+
+      expect(state).toMatchObject({
+        active: false,
+        stopped: true,
+        signals: ["Réflexion arrêtée"]
+      });
+    } finally {
+      localeLabels.stoppedAssistant.splice(localeLabels.stoppedAssistant.indexOf("Réflexion arrêtée"), 1);
+    }
+  });
+
+  it("detects stopped status UI through the real evaluate path", async () => {
+    const state = await readAssistantGenerationState(generationStatePage({
+      assistantText: "A partial answer.",
+      statusText: "Stopped thinking"
+    }));
+
+    expect(state.active).toBe(false);
+    expect(state.stopped).toBe(true);
+    expect(state.signals).toContain("stopped thinking");
+  });
+
+  it("does not treat stopped wording inside assistant prose as status UI", async () => {
+    const state = await readAssistantGenerationState(generationStatePage({
+      assistantText: "The generation stopped condition is documented here."
+    }));
+
+    expect(state.active).toBe(false);
+    expect(state.stopped).toBe(false);
   });
 
   it("counts messages by role", () => {
@@ -420,6 +472,279 @@ describe("extractMessagesFromHtml", () => {
     expect(result.warnings.join(" ")).toContain("Assistant response text was omitted");
   });
 
+  it("requires configured completion boundaries around a non-empty assistant body", async () => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: "<Start> Finished answer. <End>",
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.complete).toBe(true);
+    expect(result.data?.completionGate).toMatchObject({
+      status: "complete",
+      startCount: 1,
+      endCount: 1
+    });
+  });
+
+  it("allows whitespace outside the configured completion boundaries", async () => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: " \n\t<Start> Finished answer. <End>\n ",
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.completionGate?.status).toBe("complete");
+  });
+
+  it("keeps a stable response partial until the end boundary arrives", async () => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: "<Start> Still generating the answer.",
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 5,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("partial");
+    expect(result.data?.completionGate?.status).toBe("end_missing");
+    expect(result.warnings.join(" ")).toContain("without resubmitting");
+  });
+
+  it("evaluates an unchanged incomplete gate only once per text hash", async () => {
+    let fullTextReads = 0;
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: `<Start> ${"long partial answer ".repeat(500)}`,
+      hasStopControl: false,
+      hasResponseActions: true
+    }], {
+      onLatestAssistantTextRead: () => {
+        fullTextReads += 1;
+      }
+    });
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 10,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("partial");
+    expect(result.data?.completionGate?.status).toBe("end_missing");
+    expect(fullTextReads).toBe(1);
+  });
+
+  it("completes when a later snapshot adds the missing end boundary", async () => {
+    const page = scriptedWaitPage([
+      {
+        totalCount: 2,
+        assistantCount: 1,
+        latestAssistantTurnIndex: 2,
+        latestAssistantText: "<Start> Still generating the answer.",
+        hasStopControl: false,
+        hasResponseActions: true
+      },
+      {
+        totalCount: 2,
+        assistantCount: 1,
+        latestAssistantTurnIndex: 2,
+        latestAssistantText: "<Start> Finished answer. <End>",
+        hasStopControl: false,
+        hasResponseActions: true
+      }
+    ]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.output_text).toBe("<Start> Finished answer. <End>");
+    expect(result.data?.completionGate?.status).toBe("complete");
+  });
+
+  it.each([
+    ["start_missing", "Preamble <Start> first <End>"],
+    ["duplicate_start", "<Start> first <Start> second <End>"],
+    ["duplicate_end", "<Start> first <End> second <End>"],
+    ["empty_body", "<Start> \n\t <End>"]
+  ] as const)("reports strict completion gate status %s", async (status, latestAssistantText) => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText,
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 5,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("partial");
+    expect(result.data?.completionGate?.status).toBe(status);
+  });
+
+  it.each([
+    ["duplicate boundaries", "<Start> first <Start> second <End>", { requireUnique: false }],
+    ["an empty body", "<Start><End>", { requireNonEmptyBody: false }]
+  ] as const)("supports explicitly allowing %s", async (_case, latestAssistantText, policy) => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText,
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>", ...policy }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.completionGate?.status).toBe("complete");
+  });
+
+  it.each([
+    [{ start: "", end: "<End>" }, "non-empty"],
+    [{ start: " <Start>", end: "<End>" }, "leading or trailing whitespace"],
+    [{ start: "<Start>", end: "<End>\n" }, "leading or trailing whitespace"],
+    [{ start: "<Gate>", end: "<Gate>" }, "distinct"],
+    [{ start: "<Start>", end: "<Start><End>" }, "contain one another"]
+  ])("rejects an invalid completion gate before waiting", async (completionGate, message) => {
+    const result = await waitForMessage({}, { completionGate });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("error");
+    expect(result.error).toMatchObject({
+      name: "InvalidCompletionGate",
+      recoverable: false
+    });
+    expect(result.error?.message).toContain(message);
+    expect(result.data?.completionGate?.status).toBe("invalid_boundary");
+  });
+
+  it("safely rejects a non-object completion gate from an untyped caller", async () => {
+    const result = await waitForMessage({}, {
+      completionGate: null as unknown as { start: string; end: string }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.name).toBe("InvalidCompletionGate");
+    expect(result.data?.completionGate?.status).toBe("invalid_boundary");
+  });
+
+  it("does not accept an old gated reply that fails either turn baseline", async () => {
+    const page = scriptedWaitPage([{
+      totalCount: 3,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: "<Start> Old finished reply. <End>",
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterTurnCount: 3,
+      afterAssistantTurnCount: 1,
+      timeoutMs: 5,
+      stableMs: 0,
+      pollMs: 1,
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("timeout");
+    expect(result.data).toBeUndefined();
+  });
+
+  it("redacts gated response content in metadata mode", async () => {
+    const page = scriptedWaitPage([{
+      totalCount: 2,
+      assistantCount: 1,
+      latestAssistantTurnIndex: 2,
+      latestAssistantText: "<Start> Secret response body. <End>",
+      hasStopControl: false,
+      hasResponseActions: true
+    }]);
+
+    const result = await waitForMessage({ page }, {
+      afterAssistantTurnCount: 0,
+      timeoutMs: 100,
+      stableMs: 0,
+      pollMs: 1,
+      responseContent: "metadata",
+      completionGate: { start: "<Start>", end: "<End>" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.output_text).toBeUndefined();
+    expect(result.data?.responseText).toBeUndefined();
+    expect(result.data?.responseChars).toBeGreaterThan(0);
+    expect(result.data?.responseSha256).toHaveLength(64);
+    expect(result.data?.completionGate).toMatchObject({
+      status: "complete",
+      startCount: 1,
+      endCount: 1
+    });
+    expect(JSON.stringify(result.data)).not.toContain("Secret response body");
+  });
+
   it("bounds page-state blocker scans so assistant text is not lost", async () => {
     const page = scriptedWaitPage([
       {
@@ -512,6 +837,57 @@ describe("extractMessagesFromHtml", () => {
     expect(result.data?.complete).toBe(false);
     expect(result.warnings.join(" ")).toContain("Timed out after receiving partial assistant text.");
     expect(result.warnings.join(" ")).toContain("completion was not confirmed");
+  });
+
+  it("accepts prompt as a messages.ask compatibility alias", async () => {
+    const page = askWaitFallbackPage("Write 500 numbered items.", "I will now produce the list.");
+
+    const result = await askMessage({ page }, {
+      prompt: "Write 500 numbered items.",
+      wait: { timeoutMs: 5, stableMs: 0, pollMs: 1 },
+      read: { format: "normalized_text" }
+    });
+
+    expect(result.status).toBe("partial");
+    expect(result.data?.prompt).toBe("Write 500 numbered items.");
+    expect(result.output_text).toBe("I will now produce the list.");
+  });
+
+  it("rejects conflicting text and prompt aliases before submitting", async () => {
+    const result = await askMessage({}, {
+      text: "first",
+      prompt: "second",
+      wait: false,
+      read: false
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("error");
+    expect(result.error?.message).toContain("both text and prompt");
+  });
+
+  it("reports active assistant generation through messages.status", async () => {
+    const page = scriptedWaitPage([
+      {
+        totalCount: 2,
+        assistantCount: 1,
+        latestAssistantTurnIndex: 2,
+        latestAssistantText: "I will now produce the list.",
+        hasStopControl: true,
+        stopButtonAria: "Stop answering",
+        hasResponseActions: false
+      }
+    ]);
+
+    const result = await messageStatus({ page }, { maxPreviewChars: 12 });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toMatchObject({
+      completionState: "generating",
+      generationActive: true,
+      latestAssistantPreview: "I will now ...",
+      latestAssistantTextLength: 28
+    });
   });
 
   it("waits for the send button to become ready before clicking", async () => {
@@ -771,6 +1147,60 @@ describe("extractMessagesFromHtml", () => {
     expect(result.data?.warnings?.join(" ")).toContain("captured text was clipped");
   });
 
+  it.each([
+    ["visible_text", "First line\n" + "x".repeat(12_000)],
+    ["normalized_text", "First line " + "x".repeat(12_000)]
+  ] as const)("reads long %s directly without depending on serialized message HTML", async (format, expected) => {
+    const directText = "  First line\n" + "x".repeat(12_000) + "  ";
+    const evaluatedSources: string[] = [];
+    const page: PageLike = {
+      evaluate: async <T, A = unknown>(fn: (arg: A) => T | Promise<T>, _arg?: A): Promise<T> => {
+        const source = String(fn);
+        evaluatedSources.push(source);
+        if (source.includes("__directLatestMessageText")) return directText as T;
+        if (source.includes("__latestMessageMetadata")) {
+          return {
+            role: "assistant",
+            html: "",
+            metadataHtml: "<div data-testid=\"conversation-turn-2\"><button aria-label=\"Copy response\"></button></div>"
+          } as T;
+        }
+        throw new Error(`Unexpected evaluate call: ${source}`);
+      }
+    };
+
+    const latest = await readLatestMessage(page, "assistant", format);
+
+    expect(latest?.text).toBe(expected);
+    expect(latest?.text.length).toBe(expected.length);
+    expect(latest?.actions?.map(action => action.type)).toContain("copy_response");
+    expect(evaluatedSources[0]).toContain("innerText");
+    expect(evaluatedSources[0]).not.toContain("innerHTML");
+  });
+
+  it("applies maxChars metadata to direct normalized-text capture", async () => {
+    const directText = "  " + "a".repeat(5000) + "  ";
+    const page: PageLike = {
+      evaluate: async <T, A = unknown>(fn: (arg: A) => T | Promise<T>, _arg?: A): Promise<T> => {
+        const source = String(fn);
+        if (source.includes("__directLatestMessageText")) return directText as T;
+        if (source.includes("__latestMessageMetadata")) return undefined as T;
+        throw new Error(`Unexpected evaluate call: ${source}`);
+      }
+    };
+
+    const latest = await readLatestMessage(page, "assistant", "normalized_text", 10);
+
+    expect(latest?.text).toBe("a".repeat(10));
+    expect(latest?.normalizedText).toBe("a".repeat(10));
+    expect(latest?.captureLimit).toEqual({
+      maxChars: 10,
+      originalChars: 5000,
+      clipped: true
+    });
+    expect(latest?.warnings?.join(" ")).toContain("maxChars=10");
+  });
+
   it("copyResponse can intentionally use DOM Markdown fallback", async () => {
     const html = readFileSync("tests/fixtures/chat-rich-response.html", "utf8");
     const result = await copyResponse({
@@ -924,6 +1354,61 @@ function contentPage(html: string, onClick?: () => void): PageLike {
   };
 }
 
+function generationStatePage({
+  assistantText,
+  statusText
+}: {
+  assistantText: string;
+  statusText?: string;
+}): PageLike {
+  const assistantNode = {
+    innerText: assistantText,
+    textContent: assistantText,
+    getAttribute: (name: string) => name === "data-message-author-role" ? "assistant" : null,
+    closest: (selector: string) => selector === "[data-message-author-role]" ? assistantNode : null,
+    querySelector: () => null
+  };
+  const statusNode = statusText === undefined ? undefined : {
+    innerText: statusText,
+    textContent: statusText,
+    getAttribute: (name: string) => name === "role" ? "status" : null,
+    closest: () => null,
+    querySelector: () => null
+  };
+  const turn = {
+    querySelector: (selector: string) => selector.includes("assistant") ? assistantNode : null,
+    querySelectorAll: (selector: string) => selector === "*"
+      ? [assistantNode, ...(statusNode === undefined ? [] : [statusNode])]
+      : []
+  };
+
+  return {
+    evaluate: async <T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg?: A): Promise<T> => {
+      const previousDocument = globalThis.document;
+      const previousWindow = globalThis.window;
+      try {
+        globalThis.document = {
+          querySelectorAll: (selector: string) => {
+            if (selector === "button") return [];
+            if (selector.includes("conversation-turn")) return [turn];
+            if (selector.includes("[role='status']")) {
+              return statusNode === undefined ? [] : [statusNode];
+            }
+            return [];
+          }
+        } as unknown as Document;
+        globalThis.window = {
+          getComputedStyle: () => ({ display: "block", opacity: "1", visibility: "visible" })
+        } as unknown as Window & typeof globalThis;
+        return await fn(arg as A);
+      } finally {
+        globalThis.document = previousDocument;
+        globalThis.window = previousWindow;
+      }
+    }
+  };
+}
+
 function askWaitFallbackPage(prompt: string, answer: string): PageLike {
   let composerText = "";
   let submitted = false;
@@ -1059,7 +1544,10 @@ type WaitSnapshot = {
   failTextFetch?: boolean;
 };
 
-function scriptedWaitPage(snapshots: WaitSnapshot[]): PageLike {
+function scriptedWaitPage(
+  snapshots: WaitSnapshot[],
+  hooks: { onLatestAssistantTextRead?: () => void } = {}
+): PageLike {
   let index = 0;
   const current = () => snapshots[Math.min(index, snapshots.length - 1)]!;
 
@@ -1117,6 +1605,7 @@ function scriptedWaitPage(snapshots: WaitSnapshot[]): PageLike {
         return { active, stopped, signals } as T;
       }
       if (source.includes("node?.innerText")) {
+        hooks.onLatestAssistantTextRead?.();
         if (snapshot.failTextFetch === true) {
           throw new Error("simulated exit-time DOM read failure");
         }

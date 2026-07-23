@@ -6,9 +6,20 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const ms = {
+  configurationAxes: {
+    effort: ["Usaha"],
+    speed: ["Kelajuan"],
+  },
+  configurationOptions: {
+    light: ["Ringan"],
+    medium: ["Sederhana"],
+    high: ["Tinggi"],
+    extraHigh: ["Sangat Tinggi"],
+    fast: ["Pantas"],
+  },
   composerTextbox: ["Tanya apa-apa sahaja..."],
   sendButton: ["Hantar gesaan"],
   searchChatsButton: ["Cari sembang"],
@@ -33,4 +44,5 @@ export const ms = {
   },
   signedInMarkers: ["Sembang baharu", "Cari sembang", "Terbaharu", "Sejarah sembang", "Projek", "Tanya apa-apa sahaja..."],
   responseActions: ["Salin tindak balas"],
+  stopControl: ["Hentikan jawapan"],
 } satisfies LocaleContribution;

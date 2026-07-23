@@ -56,12 +56,32 @@ Treat selector drift as a product-change blocker. Capture the smallest public-sa
 
 ## GPT-5.6 Sol High Consultation Recovery
 
-Focused consultations submit exactly once. Save the submitted thread URL and
-the pre-submit total and assistant turn counts. If polling or the browser
-kernel times out, reconnect to the same visible thread, then use bounded
-`messages.wait(...)` and `messages.readLatest(...)` recovery. Never submit the
-prompt again; only report a captured answer when the valid read shows both
-turn counts advanced beyond the saved baselines.
+Focused consultations submit exactly once. Save the claimed tab id, canonical
+thread URL when available, and the pre-submit total and assistant turn counts.
+If polling or the browser kernel times out, wait eight seconds, reconnect to
+the same visible thread, then resume bounded `messages.wait(...)` recovery with
+the original baselines and strict
+`completionGate: { start: "<Start>", end: "<End>" }`. Never submit the prompt
+again.
+
+The focused prompt requires each marker exactly once and substantive content
+between them. A stable response with no `<End>`, a preamble before `<Start>`,
+duplicate markers, or an empty body is still incomplete. Keep polling the exact
+thread until `data.completionGate.status` is `complete`, then read unclipped
+`visible_text` and independently verify the same envelope and advanced turn
+counts. If the overall recovery budget expires, report the exact thread URL
+and blocker instead of claiming success.
+
+The first post-submit URL may be a provisional `/c/WEB:...` value. Keep polling
+the claimed page until command context exposes a canonical
+`https://chatgpt.com/c/<conversation-id>` URL; never use the provisional value
+for a recovery reopen. If the runtime fails first, reclaim only the saved tab
+id, require both turn counts to advance beyond their baselines, then save and
+reopen its canonical URL. Block if any of those checks fail.
+
+Do not use a clipped `maxChars` read to validate the end boundary. Markdown or
+HTML serialization can also be unsuitable for literal angle-bracket gates; use
+the direct visible-text capture for final validation.
 
 The current Plus mode picker may show `GPT-5.6 Sol` and `High` while the
 composer reports only `High` after selection. That is the active GPT-5.6 Sol

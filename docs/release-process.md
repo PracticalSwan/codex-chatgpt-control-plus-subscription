@@ -7,14 +7,17 @@ status: draft
 
 # Release Process
 
-## Fork Source Of Truth
+The registry, tag, mirror-generation, and trusted-publishing sections in this
+runbook document the canonical upstream project. The inherited release jobs
+are guarded to run only in `adamallcock/codex-chatgpt-control`; tags pushed to
+this fork cannot publish the upstream-owned npm or PyPI coordinates.
 
-This repository is the source of truth for the Plus workflow. Use normal,
-reviewable changes in this repository; do not depend on a private-source export
-or generated public mirror.
+## Canonical Source Alpha (Upstream Only)
 
-1. Run deterministic Node and Python parity gates.
-2. Build and validate the Codex plugin runtime:
+1. Keep the private repository as the source of truth and publish only from the
+   generated public repository.
+2. Run deterministic Node and Python parity gates.
+3. Build and validate the Codex plugin runtime:
 
    ```bash
    npm run plugin:build
@@ -22,19 +25,63 @@ or generated public mirror.
    npm run plugin:validate
    ```
 
-3. Verify no live reports, thread URLs, credentials, or local paths are
-   committed.
-4. Review `git diff --check` and the final diff before opening a pull request.
+4. Verify no live reports, thread URLs, credentials, or local paths are committed.
+
+## Canonical Public Mirror Regeneration (Upstream Only)
+
+The public repository is generated from the private source tree. Regenerate it
+from the private repository and land changes through a public pull request so
+contributors can review the public-facing history.
+
+1. In the private repository, confirm source changes are merged and clean.
+2. Rebuild plugin runtime bundles before export when runtime code changed:
+
+   ```bash
+   node tools/public-export/root/scripts/build-plugin-runtime.mjs --root .
+   node tools/public-export/root/scripts/check-plugin-runtime.mjs --root .
+   ```
+
+3. Run the exporter check:
+
+   ```bash
+   # From the private repository root.
+   node tools/public-export/export-public.mjs --check
+   ```
+
+4. Generate into a public branch, not public `main`:
+
+   ```bash
+   git switch -c codex/public-export-<topic>
+   node /path/to/private/tools/public-export/export-public.mjs --write
+   ```
+
+5. Split the generated public diff into public-readable commits. Prefer
+   feature groups such as runtime behavior, localization, diagnostics,
+   contracts, docs, and plugin runtime bundles. Avoid one opaque `chore`
+   commit when public contributors cannot see the private source commits.
+6. Validate the public branch:
+
+   ```bash
+   # From the generated public checkout.
+   npm run node:build
+   npm run python:compile
+   npm run node:contracts
+   npm run plugin:validate
+   npm run node:bundle
+   npm run plugin:check
+   ```
+
+7. Open a public PR with a self-contained summary and merge with a normal merge
+   commit when the split commit stack should remain visible.
 
 ## Codex Plugin Alpha
 
 1. Confirm the marketplace file is present at `.agents/plugins/marketplace.json`.
 2. Confirm the plugin manifest is present at `plugins/codex-chatgpt-control/.codex-plugin/plugin.json`.
-3. Confirm the plugin exposes exactly two V1 skills:
+3. Confirm the plugin exposes exactly three V1 skills:
    - `codex-chatgpt-control`
+   - `chatgpt-delegate`
    - `chatgpt-gpt-5-6-high-consult`
-   These skills must remain bundled in this one plugin; do not add a separate
-   consultation plugin or marketplace entry.
 4. Install locally from the checkout:
 
    ```bash
@@ -46,59 +93,103 @@ or generated public mirror.
    `codex plugin marketplace list` and reinstall from that configured name.
 
 5. Start a new Codex thread and verify the plugin skills are discoverable.
-6. In an ordinary shell, browser-required commands should return a structured
+6. Inspect the focused skill and confirm it pins GPT-5.6 Sol at High
+   Intelligence, passes a unique non-empty `<Start>` / `<End>` gate to
+   `messages.wait`, delays exact-thread recovery, preserves both pre-submit turn
+   baselines, and forbids Pro fallback and recovery resubmission.
+7. In an ordinary shell, browser-required commands should return a structured
    `browser_bridge_unavailable` blocker rather than faking browser access.
-7. Run live ChatGPT smoke tests only with explicit approval and non-sensitive
+8. Run live ChatGPT smoke tests only with explicit approval and non-sensitive
    prompts.
 
-## Trusted Publishing
+## Fork Registry Boundary
 
-When a fork-owned registry release is intentionally made, npm and PyPI releases
-are published from `.github/workflows/release.yml` using GitHub Actions OIDC
-trusted publishing. Do not store npm or PyPI API tokens in GitHub secrets for
-this workflow.
+This fork retains the upstream npm and PyPI package identities for source
+compatibility. It does not claim registry ownership, and its fork-only Sol High
+and completion-gate changes are not present in the canonical registry
+artifacts. The upstream `0.5.1-alpha.1` / `0.5.1a1` versions already exist, so
+`npm run release:check-names` is expected to refuse those versions.
 
-The registry-side trusted publisher configuration must match the public
-repository exactly:
+Do not push a release tag from this fork or configure its inherited publishing
+workflow against the upstream-owned package names. A future fork publication
+must first use distinct package names or an explicitly coordinated ownership
+transfer, then update package metadata, trusted-publisher settings, install
+docs, tests, and verification scripts together.
 
-- Repository: `PracticalSwan/codex-chatgpt-control-plus-subscription`
+## Canonical Trusted Publishing Reference
+
+npm and PyPI releases are published from `.github/workflows/release.yml` using
+GitHub Actions OIDC trusted publishing. Do not store npm or PyPI API tokens in
+GitHub secrets for this workflow.
+
+For the canonical upstream project, registry-side trusted publisher
+configuration must match:
+
+- Repository: `adamallcock/codex-chatgpt-control`
 - Workflow filename: `release.yml`
 - Environment: `release`
 - npm package: `codex-chatgpt-control`
 - PyPI project: `codex-chatgpt-control`
 
-This fork currently retains the original package names for source
-compatibility. Before enabling publication, confirm that the publisher owns
-both registry names; otherwise choose fork-owned names and update manifests,
-imports, commands, documentation, and release checks together. Until then,
-install the source checkout or Codex plugin rather than assuming a registry
-package contains the Plus workflow.
-
 The `release` GitHub environment should require human approval. That keeps tag
 creation reversible until the protected publish jobs start, while still making
 the package upload itself reproducible and tokenless.
 
-## Release Tag Flow
+## Canonical Release Tag Flow (Upstream Only)
 
-1. Merge the reviewed pull request after required checks pass.
-2. Confirm versions and registry availability on `main`:
+1. Merge the generated public PR after required public checks pass.
+2. Before tagging, run the release canary from a bridge-hosted JavaScript call
+   against an exact dedicated ChatGPT tab:
+
+   ```js
+   const canary = await import("file:///absolute/path/to/packages/node/dist/codex-chatgpt-control-release-canary.bundle.mjs?t=" + Date.now());
+   await canary.runReleaseCanary(globalThis, { tabId: "<dedicated-tab-id>" });
+   ```
+
+   This is a local authenticated gate, not public CI. It captures sanitized Chat
+   and Work profiles, verifies the expansion flow, mutates/restores Work effort,
+   verifies an exact generated CSV download, and restores Chat. Add
+   `includeUpload: true` only with explicit upload authorization.
+
+3. When selector/localization drift is in scope, run the visible Settings loop
+   and review its JSONL before applying it:
+
+   ```bash
+   npm --prefix packages/node run capture:intelligence-locales -- \
+     --auto-switch --all --capture-surfaces --if-missing open
+   npm --prefix packages/node run apply:intelligence-locales -- \
+     --in <capture.jsonl> --reviewed
+   ```
+
+4. Confirm versions and registry availability on public `main`:
 
    ```bash
    npm run release:check-version
    npm run release:check-names
    ```
 
-3. Create and push a `v*` tag that matches the Node package version:
+5. Create and push a `v*` tag that matches the Node package version:
 
    ```bash
-   git tag v0.2.0-alpha.1
-   git push origin v0.2.0-alpha.1
+   git tag v0.5.1-alpha.1
+   git push origin v0.5.1-alpha.1
    ```
 
-4. Approve the `release` environment deployment in GitHub Actions.
-5. Let the workflow publish npm and PyPI independently. If one registry publish
+6. Approve the `release` environment deployment in GitHub Actions. The workflow
+   first runs all release gates plus a clean-install package smoke on
+   `macos-latest`.
+7. Let the workflow publish npm and PyPI independently. If one registry publish
    succeeds and the other fails, rerun only the failed job.
-6. Verify the published packages:
+8. The workflow must then clean-install the exact published npm and PyPI
+   versions, import both SDKs, exercise the installed Node backend from Python,
+   and only then create the GitHub prerelease. Re-run the same verification
+   locally if diagnosing propagation:
+
+   ```bash
+   npm run release:verify-published
+   ```
+
+9. Verify the published package metadata:
 
    ```bash
    npm view codex-chatgpt-control version dist-tags --json
@@ -110,7 +201,7 @@ the package upload itself reproducible and tokenless.
    PY
    ```
 
-## npm Alpha
+## Canonical npm Alpha (Upstream Only)
 
 1. Recheck registry state immediately before publishing:
 
@@ -132,7 +223,7 @@ the package upload itself reproducible and tokenless.
    shells unless the trusted-publishing path is unavailable and the release
    owner explicitly approves a one-off fallback.
 
-## PyPI Alpha
+## Canonical PyPI Alpha (Upstream Only)
 
 Best-practice backend story: keep the Node runtime as the authoritative browser backend and make Python a protocol client that launches or connects to an explicit sidecar command. For alpha, require a separately installed or locally built Node backend command. For beta, add a Python helper that discovers a trusted installed backend, such as the npm package binary or an explicitly configured command. Avoid silently embedding stale generated JavaScript in the wheel unless the export, versioning, and smoke tests prove the embedded backend and Python protocol are in lockstep.
 

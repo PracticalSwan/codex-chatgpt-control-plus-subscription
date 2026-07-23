@@ -65,6 +65,20 @@ describe("wait snapshot metadata", () => {
     expect(snapshot?.generation.stopped).toBe(false);
   });
 
+  it("detects a visible stopped label outside assistant prose", async () => {
+    const page = domBackedPage({
+      assistantText: "A partial answer.",
+      actionButtonText: "Copy response",
+      stoppedStatusText: "Stopped thinking"
+    });
+
+    const snapshot = await readWaitDomSnapshot(page);
+
+    expect(snapshot?.generation.active).toBe(false);
+    expect(snapshot?.generation.stopped).toBe(true);
+    expect(snapshot?.generation.signals).toContain("stopped thinking");
+  });
+
   it("returns undefined response actions when no conversation turn markers exist", async () => {
     const page = domBackedPage({
       assistantText: "Answer without turn testids",
@@ -82,6 +96,8 @@ type FakeButton = {
   textContent: string;
   disabled: boolean;
   getAttribute: (name: string) => string | null;
+  closest: (selector: string) => FakeButton | null;
+  querySelector: () => null;
 };
 
 function fakeButton(text: string): FakeButton {
@@ -89,15 +105,30 @@ function fakeButton(text: string): FakeButton {
     innerText: text,
     textContent: text,
     disabled: false,
-    getAttribute: () => null
+    getAttribute: () => null,
+    closest: () => null,
+    querySelector: () => null
   };
 }
 
 function fakeMessageNode(role: "user" | "assistant", text: string) {
-  return {
+  const node = {
     getAttribute: (name: string) => name === "data-message-author-role" ? role : null,
     innerText: text,
-    textContent: text
+    textContent: text,
+    closest: (selector: string) => selector === "[data-message-author-role]" ? node : null,
+    querySelector: () => null
+  };
+  return node;
+}
+
+function fakeStatusNode(text: string) {
+  return {
+    getAttribute: (name: string) => name === "role" ? "status" : null,
+    innerText: text,
+    textContent: text,
+    closest: () => null,
+    querySelector: () => null
   };
 }
 
@@ -105,26 +136,39 @@ function domBackedPage({
   assistantText,
   stopButtonText,
   actionButtonText,
+  stoppedStatusText,
   bodyText = "New chat Chat with ChatGPT",
   includeTurnMarkers = true
 }: {
   assistantText: string;
   stopButtonText?: string;
   actionButtonText?: string;
+  stoppedStatusText?: string;
   bodyText?: string;
   includeTurnMarkers?: boolean;
 }): PageLike {
   const userNode = fakeMessageNode("user", "The question");
   const assistantNode = fakeMessageNode("assistant", assistantText);
+  const stoppedStatus = stoppedStatusText === undefined ? undefined : fakeStatusNode(stoppedStatusText);
   const buttons: FakeButton[] = [
     ...(stopButtonText === undefined ? [] : [fakeButton(stopButtonText)]),
     ...(actionButtonText === undefined ? [] : [fakeButton(actionButtonText)])
   ];
   const turn = {
     querySelector: (selector: string) => selector.includes("assistant") ? assistantNode : null,
-    querySelectorAll: (selector: string) => selector === "button" && actionButtonText !== undefined
-      ? [fakeButton(actionButtonText)]
-      : []
+    querySelectorAll: (selector: string) => {
+      if (selector === "button") {
+        return actionButtonText === undefined ? [] : [fakeButton(actionButtonText)];
+      }
+      if (selector === "*") {
+        return [
+          assistantNode,
+          ...(actionButtonText === undefined ? [] : [fakeButton(actionButtonText)]),
+          ...(stoppedStatus === undefined ? [] : [stoppedStatus])
+        ];
+      }
+      return [];
+    }
   };
 
   return {
@@ -140,6 +184,9 @@ function domBackedPage({
             }
             if (selector === "button") {
               return buttons;
+            }
+            if (selector.includes("[role='status']")) {
+              return stoppedStatus === undefined ? [] : [stoppedStatus];
             }
             if (selector.includes("conversation-turn")) {
               return includeTurnMarkers ? [turn] : [];

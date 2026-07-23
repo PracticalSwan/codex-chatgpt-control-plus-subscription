@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const hu = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["Ráfordítás"],
+    speed: ["Sebesség"],
+  },
+  configurationOptions: {
+    light: ["Egyszerű"],
+    medium: ["Közepes"],
+    high: ["Erős"],
+    extraHigh: ["Extra erős"],
+    standard: ["Normál"],
+    fast: ["Gyors"],
+  },
   composerTextbox: ["Csevegés a ChatGPT-vel"],
   sendButton: ["Utasítás küldése"],
   searchChatsButton: ["Beszélgetések keresése"],
@@ -18,12 +31,12 @@ export const hu = {
   addFilesOpenerCandidates: ["Fájlok és egyebek hozzáadása"],
   addPhotosFilesMenuItem: ["Fotók és fájlok hozzáadása"],
   copyResponse: ["Válasz másolása"],
-  modeLabels: ["Azonnali", "Közepes", "Magas", "Kiemelkedően magas"],
+  modeLabels: ["Azonnali", "Közepes", "Magas", "Kiemelkedően magas", "Erős", "Extra erős"],
   modeOptions: {
     instant: ["Azonnali"],
     medium: ["Közepes"],
-    high: ["Magas"],
-    extraHigh: ["Kiemelkedően magas"],
+    high: ["Magas", "Erős"],
+    extraHigh: ["Kiemelkedően magas", "Extra erős"],
   },
   modeOpenerExtra: ["Konfigurálás..."],
   tools: {
@@ -33,4 +46,5 @@ export const hu = {
   },
   signedInMarkers: ["Új csevegés", "Beszélgetések keresése", "Legutóbbiak", "Csevegési előzmények", "Projektek", "Csevegés a ChatGPT-vel"],
   responseActions: ["Válasz másolása"],
+  stopControl: ["Válasz leállítása"],
 } satisfies LocaleContribution;

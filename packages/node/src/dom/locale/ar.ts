@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const ar = {
+  configurationAxes: {
+    model: ["النموذج"],
+    effort: ["الجهد"],
+    speed: ["السرعة"],
+  },
+  configurationOptions: {
+    light: ["خفيف"],
+    medium: ["متوسط"],
+    high: ["عالٍ"],
+    extraHigh: ["عالٍ جدًا"],
+    standard: ["قياسي"],
+    fast: ["سريع"],
+  },
   composerTextbox: ["الدردشة مع ChatGPT"],
   sendButton: ["إرسال السؤال"],
   searchChatsButton: ["البحث في الدردشات"],
@@ -18,12 +31,12 @@ export const ar = {
   addFilesOpenerCandidates: ["إضافة الملفات والمزيد"],
   addPhotosFilesMenuItem: ["إضافة صور وملفات"],
   copyResponse: ["نسخ إجابة"],
-  modeLabels: ["فوري", "متوسط", "عالي", "مكثف جدًا", "احترافي"],
+  modeLabels: ["فوري", "متوسط", "عالي", "مكثف جدًا", "احترافي", "عالٍ", "عالٍ جدًا"],
   modeOptions: {
     instant: ["فوري"],
     medium: ["متوسط"],
-    high: ["عالي"],
-    extraHigh: ["مكثف جدًا"],
+    high: ["عالي", "عالٍ"],
+    extraHigh: ["مكثف جدًا", "عالٍ جدًا"],
     pro: ["احترافي"],
   },
   modeOpenerExtra: ["تكوين"],
@@ -34,4 +47,5 @@ export const ar = {
   },
   signedInMarkers: ["دردشة جديدة", "البحث في الدردشات", "المحادثات الأخيرة", "المكتبة", "المشروعات", "الدردشة مع ChatGPT"],
   responseActions: ["نسخ إجابة"],
+  stopControl: ["إيقاف الرد"],
 } satisfies LocaleContribution;

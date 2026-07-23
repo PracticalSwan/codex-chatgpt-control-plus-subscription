@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const my = {
+  configurationAxes: {
+    model: ["မော်ဒယ်"],
+    effort: ["အားထုတ်မှု"],
+    speed: ["အမြန်နှုန်း"],
+  },
+  configurationOptions: {
+    light: ["ပေါ့ပါး"],
+    medium: ["အလယ်အလတ်"],
+    high: ["အမြင့်"],
+    extraHigh: ["အလွန်မြင့်"],
+    standard: ["ပုံမှန်"],
+    fast: ["အမြန်"],
+  },
   composerTextbox: ["တစ်ခုခု မေးပါ…"],
   sendButton: ["တုံ့ပြန်ညွှန်ကြားချက် ပို့မည်"],
   searchChatsButton: ["ချတ်များ ရှာရန်"],
@@ -18,11 +31,11 @@ export const my = {
   addFilesOpenerCandidates: ["ဖိုင်များနှင့် အခြားအရာများကို ထည့်ရန်"],
   addPhotosFilesMenuItem: ["ဓာတ်ပုံများနှင့် ဖိုင်များကို တင်ပါ"],
   copyResponse: ["တုံ့ပြန်မှု ကူးယူရန်"],
-  modeLabels: ["ချက်ချင်း", "အလယ်အလတ်", "မြင့်", "အလွန်မြင့်"],
+  modeLabels: ["ချက်ချင်း", "အလယ်အလတ်", "မြင့်", "အလွန်မြင့်", "အမြင့်"],
   modeOptions: {
     instant: ["ချက်ချင်း"],
     medium: ["အလယ်အလတ်"],
-    high: ["မြင့်"],
+    high: ["မြင့်", "အမြင့်"],
     extraHigh: ["အလွန်မြင့်"],
   },
   modeOpenerExtra: ["ပြုပြင်မွမ်းမံရန်"],
@@ -33,4 +46,5 @@ export const my = {
   },
   signedInMarkers: ["ချတ်အသစ်", "ချတ်များ ရှာရန်", "လတ်တလော", "ချတ် မှတ်တမ်း", "စီမံကိန်းများ", "တစ်ခုခု မေးပါ…"],
   responseActions: ["တုံ့ပြန်မှု ကူးယူရန်"],
+  stopControl: ["ဖြေဆိုခြင်း ရပ်ရန်"],
 } satisfies LocaleContribution;

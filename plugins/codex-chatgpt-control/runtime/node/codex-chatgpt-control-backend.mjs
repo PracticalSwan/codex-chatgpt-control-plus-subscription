@@ -4,11 +4,11 @@
 import { createInterface } from "node:readline";
 
 // src/commands/artifacts.ts
-import { copyFile, mkdir as mkdir2, stat as stat2, writeFile } from "node:fs/promises";
+import { copyFile as copyFile2, mkdir as mkdir2, stat as stat2, writeFile } from "node:fs/promises";
 import { basename as basename2, join as join2, resolve as resolve2 } from "node:path";
 
 // src/browser/downloads.ts
-import { mkdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 // src/commands/timeouts.ts
@@ -30,7 +30,7 @@ function localGuardTimeout(timeoutMs, capMs) {
 }
 
 // src/browser/downloads.ts
-async function waitForDownloadFromClick(page, click, destDir, timeoutMs) {
+async function waitForDownloadFromClick(page, click, destDir, timeoutMs, filenameHint) {
   const absoluteDest = resolve(destDir);
   await mkdir(absoluteDest, { recursive: true });
   const downloadPromise = page.waitForEvent?.("download", { timeout: timeoutMs, timeoutMs });
@@ -43,12 +43,17 @@ async function waitForDownloadFromClick(page, click, destDir, timeoutMs) {
     "Download control click did not complete before the local guard timeout."
   );
   const download = await downloadPromise;
-  const suggestedFilename = download.suggestedFilename?.() ?? `chatgpt-download-${Date.now()}`;
+  const sourcePath = typeof download.path === "function" ? await download.path() : null;
+  const suggestedFilename = filenameHint ?? download.suggestedFilename?.() ?? (sourcePath === null ? void 0 : basename(sourcePath)) ?? `chatgpt-download-${Date.now()}`;
   const targetPath = join(absoluteDest, basename(suggestedFilename));
   if (typeof download.saveAs === "function") {
     await download.saveAs(targetPath);
+  } else if (sourcePath !== null) {
+    if (resolve(sourcePath) !== resolve(targetPath)) {
+      await copyFile(sourcePath, targetPath);
+    }
   } else {
-    throw new Error("The browser download object does not expose saveAs().");
+    throw new Error("The browser download object exposes neither saveAs() nor a completed local path().");
   }
   const saved = await stat(targetPath);
   if (saved.size <= 0) {
@@ -141,7 +146,9 @@ function classifyVisibleText(text) {
 // src/dom/locale/en.ts
 var en = {
   // --- Primary interaction path (accessible names) ---
-  composerTextbox: ["Chat with ChatGPT"],
+  composerTextbox: ["Chat with ChatGPT", "Ask ChatGPT"],
+  workComposerTextbox: ["Work on anything", "Work on something"],
+  newWork: ["Work on something else", "New work", "New task"],
   sendButton: ["Send prompt"],
   searchChatsButton: ["Search chats"],
   searchChatsPlaceholder: ["Search chats..."],
@@ -169,10 +176,34 @@ var en = {
     medium: ["Medium"],
     high: ["High"],
     extraHigh: ["Extra High"],
-    pro: ["Pro", "Pro Extended", "Extended Pro"]
+    pro: ["Pro", "Pro Extended", "Pro \u2022 Extended", "Extended Pro"]
   },
   /** Extra openers that surface the mode menu but are not selectable modes themselves. */
   modeOpenerExtra: ["Configure"],
+  // --- Chat / Work surfaces and capability-driven configuration ---
+  experienceOptions: {
+    chat: ["Chat", "Quick chat"],
+    work: ["Work"]
+  },
+  configurationAxes: {
+    model: ["Model"],
+    intelligence: ["Intelligence"],
+    effort: ["Effort"],
+    speed: ["Speed"],
+    advanced: ["Advanced"]
+  },
+  configurationOptions: {
+    instant: ["Instant"],
+    light: ["Light"],
+    medium: ["Medium"],
+    high: ["High"],
+    extraHigh: ["Extra High"],
+    max: ["Max"],
+    ultra: ["Ultra"],
+    pro: ["Pro"],
+    standard: ["Standard"],
+    fast: ["Fast"]
+  },
   // --- Thread/action menu rejection (wrong-menu veto for mode selection) ---
   /** Exact thread/conversation action menu items; a menu containing these is not the mode menu. */
   threadActionMenuItems: ["Archive", "Copy link", "Delete", "Move to project", "Rename", "Share"],
@@ -206,6 +237,18 @@ var en = {
 
 // src/dom/locale/de.ts
 var de = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["Aufwand"],
+    speed: ["Tempo"]
+  },
+  configurationOptions: {
+    light: ["Leicht"],
+    medium: ["Mittel"],
+    high: ["Hoch"],
+    extraHigh: ["Sehr hoch"],
+    fast: ["Schnell"]
+  },
   composerTextbox: ["Mit ChatGPT chatten"],
   sendButton: ["Aufforderung senden"],
   searchChatsButton: ["Chats durchsuchen"],
@@ -215,12 +258,12 @@ var de = {
   addFilesOpenerCandidates: ["Dateien und mehr hinzuf\xFCgen"],
   addPhotosFilesMenuItem: ["Fotos und Dateien hinzuf\xFCgen"],
   copyResponse: ["Antwort kopieren"],
-  modeLabels: ["Sofort", "Mittel", "Hoch", "Extra hoch"],
+  modeLabels: ["Sofort", "Mittel", "Hoch", "Extra hoch", "Sehr hoch"],
   modeOptions: {
     instant: ["Sofort"],
     medium: ["Mittel"],
     high: ["Hoch"],
-    extraHigh: ["Extra hoch"]
+    extraHigh: ["Extra hoch", "Sehr hoch"]
   },
   modeOpenerExtra: ["Konfigurieren"],
   tools: {
@@ -228,11 +271,25 @@ var de = {
     create_image: ["Bild erstellen"]
   },
   signedInMarkers: ["Neuer Chat", "Chats durchsuchen", "Letzte", "Bibliothek", "Projekte", "Mit ChatGPT chatten"],
-  responseActions: ["Antwort kopieren"]
+  responseActions: ["Antwort kopieren"],
+  stopControl: ["Antwort stoppen"]
 };
 
 // src/dom/locale/es-ES.ts
 var esES = {
+  configurationAxes: {
+    model: ["Modelo"],
+    effort: ["Esfuerzo"],
+    speed: ["Velocidad"]
+  },
+  configurationOptions: {
+    light: ["Ligero"],
+    medium: ["Media"],
+    high: ["Alta"],
+    extraHigh: ["Muy alta"],
+    standard: ["Est\xE1ndar"],
+    fast: ["R\xE1pido"]
+  },
   composerTextbox: ["Chatear con ChatGPT"],
   sendButton: ["Enviar indicaci\xF3n"],
   searchChatsButton: ["Buscar chats"],
@@ -256,11 +313,24 @@ var esES = {
     create_image: ["Crea una imagen"]
   },
   signedInMarkers: ["Nuevo chat", "Buscar chats", "Recientes", "Biblioteca", "Proyectos", "Chatear con ChatGPT"],
-  responseActions: ["Copiar respuesta"]
+  responseActions: ["Copiar respuesta"],
+  stopControl: ["Detener respuesta"]
 };
 
 // src/dom/locale/fr-FR.ts
 var frFR = {
+  configurationAxes: {
+    model: ["Mod\xE8le"],
+    effort: ["Niveau"],
+    speed: ["Vitesse"]
+  },
+  configurationOptions: {
+    light: ["Minimal"],
+    medium: ["Moyenne"],
+    high: ["\xC9lev\xE9e"],
+    extraHigh: ["Tr\xE8s \xE9lev\xE9e"],
+    fast: ["Rapide"]
+  },
   composerTextbox: ["Discuter avec ChatGPT"],
   sendButton: ["Envoyer le prompt"],
   searchChatsButton: ["Rechercher dans les chats"],
@@ -270,11 +340,12 @@ var frFR = {
   addFilesOpenerCandidates: ["Ajouter des fichiers et plus encore"],
   addPhotosFilesMenuItem: ["Ajouter des photos et fichiers"],
   copyResponse: ["Copier la r\xE9ponse"],
-  modeLabels: ["Moyen", "Avanc\xE9", "Tr\xE8s \xE9lev\xE9"],
+  modeLabels: ["Moyen", "Avanc\xE9", "Tr\xE8s \xE9lev\xE9", "Instantan\xE9e", "Moyenne", "\xC9lev\xE9e", "Tr\xE8s \xE9lev\xE9e"],
   modeOptions: {
-    medium: ["Moyen"],
-    high: ["Avanc\xE9"],
-    extraHigh: ["Tr\xE8s \xE9lev\xE9"]
+    instant: ["Instantan\xE9e"],
+    medium: ["Moyen", "Moyenne"],
+    high: ["Avanc\xE9", "\xC9lev\xE9e"],
+    extraHigh: ["Tr\xE8s \xE9lev\xE9", "Tr\xE8s \xE9lev\xE9e"]
   },
   modeOpenerExtra: ["Configurer"],
   tools: {
@@ -283,11 +354,25 @@ var frFR = {
     create_image: ["Cr\xE9er une image"]
   },
   signedInMarkers: ["Nouveau chat", "Rechercher dans les chats", "R\xE9cents", "Biblioth\xE8que", "Projets", "Discuter avec ChatGPT"],
-  responseActions: ["Copier la r\xE9ponse"]
+  responseActions: ["Copier la r\xE9ponse"],
+  stopControl: ["Interrompre la r\xE9ponse"]
 };
 
 // src/dom/locale/zh-HK.ts
 var zhHK = {
+  configurationAxes: {
+    model: ["\u6A21\u578B"],
+    effort: ["\u63A8\u7406\u5F37\u5EA6"],
+    speed: ["\u56DE\u61C9\u901F\u5EA6"]
+  },
+  configurationOptions: {
+    light: ["\u5FEB\u601D"],
+    medium: ["\u4E2D"],
+    high: ["\u9AD8"],
+    extraHigh: ["\u6975\u9AD8"],
+    standard: ["\u6A19\u6E96"],
+    fast: ["\u5FEB\u901F"]
+  },
   composerTextbox: ["\u8207 ChatGPT \u5C0D\u8A71"],
   sendButton: ["\u50B3\u9001\u63D0\u793A"],
   searchChatsButton: ["\u641C\u5C0B\u5C0D\u8A71"],
@@ -297,10 +382,10 @@ var zhHK = {
   addFilesOpenerCandidates: ["\u4E0A\u8F09\u6A94\u6848\u548C\u5176\u4ED6\u5185\u5BB9"],
   addPhotosFilesMenuItem: ["\u52A0\u5165\u76F8\u7247\u548C\u6A94\u6848"],
   copyResponse: ["\u8907\u88FD\u56DE\u8986"],
-  modeLabels: ["\u5373\u6642", "\u5747\u8861", "\u9AD8", "\u6975\u9AD8", "\u5C08\u696D"],
+  modeLabels: ["\u5373\u6642", "\u5747\u8861", "\u9AD8", "\u6975\u9AD8", "\u5C08\u696D", "\u4E2D\u7B49", "\u4E2D"],
   modeOptions: {
     instant: ["\u5373\u6642"],
-    medium: ["\u5747\u8861"],
+    medium: ["\u5747\u8861", "\u4E2D\u7B49", "\u4E2D"],
     high: ["\u9AD8"],
     extraHigh: ["\u6975\u9AD8"],
     pro: ["\u5C08\u696D"]
@@ -312,11 +397,25 @@ var zhHK = {
     create_image: ["\u5275\u4F5C\u5716\u50CF"]
   },
   signedInMarkers: ["\u65B0\u5C0D\u8A71", "\u641C\u5C0B\u5C0D\u8A71", "\u6700\u8FD1\u5C0D\u8A71", "\u5716\u5EAB", "\u9805\u76EE", "\u8207 ChatGPT \u5C0D\u8A71"],
-  responseActions: ["\u8907\u88FD\u56DE\u8986"]
+  responseActions: ["\u8907\u88FD\u56DE\u8986"],
+  stopControl: ["\u505C\u6B62\u56DE\u61C9"]
 };
 
 // src/dom/locale/zh-TW.ts
 var zhTW = {
+  configurationAxes: {
+    model: ["\u6A21\u578B"],
+    effort: ["\u63A8\u7406\u5F37\u5EA6"],
+    speed: ["\u901F\u5EA6"]
+  },
+  configurationOptions: {
+    light: ["\u5FEB\u601D"],
+    medium: ["\u4E2D"],
+    high: ["\u9AD8"],
+    extraHigh: ["\u6975\u9AD8"],
+    standard: ["\u6A19\u6E96"],
+    fast: ["\u5FEB\u901F"]
+  },
   composerTextbox: ["\u8207 ChatGPT \u5C0D\u8A71"],
   sendButton: ["\u50B3\u9001\u63D0\u793A\u8A5E"],
   searchChatsButton: ["\u641C\u5C0B\u5C0D\u8A71"],
@@ -326,10 +425,10 @@ var zhTW = {
   addFilesOpenerCandidates: ["\u65B0\u589E\u6A94\u6848\u7B49\u66F4\u591A\u529F\u80FD"],
   addPhotosFilesMenuItem: ["\u65B0\u589E\u7167\u7247\u548C\u6A94\u6848"],
   copyResponse: ["\u8907\u88FD\u56DE\u61C9"],
-  modeLabels: ["\u5373\u6642", "\u4E2D\u7B49", "\u9AD8", "\u8D85\u9AD8", "\u5C08\u696D"],
+  modeLabels: ["\u5373\u6642", "\u4E2D\u7B49", "\u9AD8", "\u8D85\u9AD8", "\u5C08\u696D", "\u4E2D"],
   modeOptions: {
     instant: ["\u5373\u6642"],
-    medium: ["\u4E2D\u7B49"],
+    medium: ["\u4E2D\u7B49", "\u4E2D"],
     high: ["\u9AD8"],
     extraHigh: ["\u8D85\u9AD8"],
     pro: ["\u5C08\u696D"]
@@ -341,11 +440,25 @@ var zhTW = {
     create_image: ["\u5275\u4F5C\u5716\u50CF"]
   },
   signedInMarkers: ["\u65B0\u5C0D\u8A71", "\u641C\u5C0B\u5C0D\u8A71", "\u6700\u8FD1\u7684\u5C0D\u8A71", "\u5716\u5EAB", "\u5C08\u6848", "\u8207 ChatGPT \u5C0D\u8A71"],
-  responseActions: ["\u8907\u88FD\u56DE\u61C9"]
+  responseActions: ["\u8907\u88FD\u56DE\u61C9"],
+  stopControl: ["\u505C\u6B62\u56DE\u61C9"]
 };
 
 // src/dom/locale/ja.ts
 var ja = {
+  configurationAxes: {
+    model: ["\u30E2\u30C7\u30EB"],
+    effort: ["\u601D\u8003\u30EC\u30D9\u30EB"],
+    speed: ["\u901F\u5EA6"]
+  },
+  configurationOptions: {
+    light: ["\u8EFD"],
+    medium: ["\u4E2D\u7A0B\u5EA6"],
+    high: ["\u9AD8\u3044"],
+    extraHigh: ["\u975E\u5E38\u306B\u9AD8\u3044"],
+    standard: ["\u6A19\u6E96"],
+    fast: ["\u9AD8\u901F"]
+  },
   composerTextbox: ["ChatGPT \u3068\u30C1\u30E3\u30C3\u30C8\u3059\u308B"],
   sendButton: ["\u30D7\u30ED\u30F3\u30D7\u30C8\u3092\u9001\u4FE1\u3059\u308B"],
   searchChatsButton: ["\u30C1\u30E3\u30C3\u30C8\u3092\u691C\u7D22"],
@@ -355,12 +468,12 @@ var ja = {
   addFilesOpenerCandidates: ["\u30D5\u30A1\u30A4\u30EB\u306E\u8FFD\u52A0\u306A\u3069"],
   addPhotosFilesMenuItem: ["\u5199\u771F\u3068\u30D5\u30A1\u30A4\u30EB\u3092\u8FFD\u52A0"],
   copyResponse: ["\u56DE\u7B54\u3092\u30B3\u30D4\u30FC\u3059\u308B"],
-  modeLabels: ["\u6700\u901F", "\u6A19\u6E96", "\u9AD8", "\u6700\u9AD8"],
+  modeLabels: ["\u6700\u901F", "\u6A19\u6E96", "\u9AD8", "\u6700\u9AD8", "\u4E2D\u7A0B\u5EA6", "\u9AD8\u3044", "\u975E\u5E38\u306B\u9AD8\u3044"],
   modeOptions: {
     instant: ["\u6700\u901F"],
-    medium: ["\u6A19\u6E96"],
-    high: ["\u9AD8"],
-    extraHigh: ["\u6700\u9AD8"]
+    medium: ["\u6A19\u6E96", "\u4E2D\u7A0B\u5EA6"],
+    high: ["\u9AD8", "\u9AD8\u3044"],
+    extraHigh: ["\u6700\u9AD8", "\u975E\u5E38\u306B\u9AD8\u3044"]
   },
   modeOpenerExtra: ["\u8A2D\u5B9A\u3059\u308B"],
   tools: {
@@ -368,11 +481,23 @@ var ja = {
     create_image: ["\u753B\u50CF\u3092\u4F5C\u6210\u3059\u308B"]
   },
   signedInMarkers: ["\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8", "\u30C1\u30E3\u30C3\u30C8\u3092\u691C\u7D22", "\u6700\u8FD1\u306E\u30C1\u30E3\u30C3\u30C8", "\u30E9\u30A4\u30D6\u30E9\u30EA", "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8", "ChatGPT \u3068\u30C1\u30E3\u30C3\u30C8\u3059\u308B"],
-  responseActions: ["\u56DE\u7B54\u3092\u30B3\u30D4\u30FC\u3059\u308B"]
+  responseActions: ["\u56DE\u7B54\u3092\u30B3\u30D4\u30FC\u3059\u308B"],
+  stopControl: ["\u56DE\u7B54\u3092\u505C\u6B62"]
 };
 
 // src/dom/locale/it.ts
 var it = {
+  configurationAxes: {
+    model: ["Modello"],
+    effort: ["Sforzo"],
+    speed: ["Velocit\xE0"]
+  },
+  configurationOptions: {
+    medium: ["Medio"],
+    high: ["Alto"],
+    extraHigh: ["Molto alto"],
+    fast: ["Veloce"]
+  },
   composerTextbox: ["Chatta con ChatGPT"],
   sendButton: ["Invia prompt"],
   searchChatsButton: ["Cerca chat"],
@@ -382,12 +507,12 @@ var it = {
   addFilesOpenerCandidates: ["Aggiungi file e altro"],
   addPhotosFilesMenuItem: ["Aggiungi foto e file"],
   copyResponse: ["Copia risposta"],
-  modeLabels: ["Istantanea", "Media", "Alta", "Extra elevata"],
+  modeLabels: ["Istantanea", "Media", "Alta", "Extra elevata", "Medio", "Alto", "Molto alto"],
   modeOptions: {
     instant: ["Istantanea"],
-    medium: ["Media"],
-    high: ["Alta"],
-    extraHigh: ["Extra elevata"]
+    medium: ["Media", "Medio"],
+    high: ["Alta", "Alto"],
+    extraHigh: ["Extra elevata", "Molto alto"]
   },
   modeOpenerExtra: ["Configura"],
   tools: {
@@ -395,11 +520,25 @@ var it = {
     create_image: ["Crea immagine"]
   },
   signedInMarkers: ["Nuova chat", "Cerca chat", "Chat recenti", "Libreria", "Progetti", "Chatta con ChatGPT"],
-  responseActions: ["Copia risposta"]
+  responseActions: ["Copia risposta"],
+  stopControl: ["Interrompi risposta"]
 };
 
 // src/dom/locale/vi.ts
 var vi = {
+  configurationAxes: {
+    model: ["M\xF4 h\xECnh"],
+    effort: ["M\u1EE9c \u0111\u1ED9"],
+    speed: ["T\u1ED1c \u0111\u1ED9"]
+  },
+  configurationOptions: {
+    light: ["Nh\u1EB9"],
+    medium: ["V\u1EEBa"],
+    high: ["Cao"],
+    extraHigh: ["Chuy\xEAn s\xE2u"],
+    standard: ["Ti\xEAu chu\u1EA9n"],
+    fast: ["Nhanh"]
+  },
   composerTextbox: ["Tr\xF2 chuy\u1EC7n v\u1EDBi ChatGPT"],
   sendButton: ["G\u1EEDi l\u1EDDi nh\u1EAFc"],
   searchChatsButton: ["T\xECm ki\u1EBFm \u0111o\u1EA1n chat"],
@@ -409,12 +548,12 @@ var vi = {
   addFilesOpenerCandidates: ["Th\xEAm t\u1EC7p v\xE0 nhi\u1EC1u t\xEDnh n\u0103ng kh\xE1c"],
   addPhotosFilesMenuItem: ["Th\xEAm \u1EA3nh v\xE0 t\u1EC7p"],
   copyResponse: ["Sao ch\xE9p ph\u1EA3n h\u1ED3i"],
-  modeLabels: ["T\u1EE9c th\xEC", "Trung b\xECnh", "Cao", "R\u1EA5t cao"],
+  modeLabels: ["T\u1EE9c th\xEC", "Trung b\xECnh", "Cao", "R\u1EA5t cao", "V\u1EEBa", "Chuy\xEAn s\xE2u"],
   modeOptions: {
     instant: ["T\u1EE9c th\xEC"],
-    medium: ["Trung b\xECnh"],
+    medium: ["Trung b\xECnh", "V\u1EEBa"],
     high: ["Cao"],
-    extraHigh: ["R\u1EA5t cao"]
+    extraHigh: ["R\u1EA5t cao", "Chuy\xEAn s\xE2u"]
   },
   modeOpenerExtra: ["\u0110\u1ECBnh c\u1EA5u h\xECnh"],
   tools: {
@@ -423,11 +562,25 @@ var vi = {
     create_image: ["T\u1EA1o h\xECnh \u1EA3nh"]
   },
   signedInMarkers: ["\u0110o\u1EA1n chat m\u1EDBi", "T\xECm ki\u1EBFm \u0111o\u1EA1n chat", "G\u1EA7n \u0111\xE2y", "Th\u01B0 vi\u1EC7n", "D\u1EF1 \xE1n", "Tr\xF2 chuy\u1EC7n v\u1EDBi ChatGPT"],
-  responseActions: ["Sao ch\xE9p ph\u1EA3n h\u1ED3i"]
+  responseActions: ["Sao ch\xE9p ph\u1EA3n h\u1ED3i"],
+  stopControl: ["D\u1EEBng tr\u1EA3 l\u1EDDi"]
 };
 
 // src/dom/locale/am.ts
 var am = {
+  configurationAxes: {
+    model: ["\u121E\u12F4\u120D"],
+    effort: ["\u1325\u1228\u1275"],
+    speed: ["\u134D\u1325\u1290\u1275"]
+  },
+  configurationOptions: {
+    light: ["\u1240\u120B\u120D"],
+    medium: ["\u1218\u12AB\u12A8\u1208\u129B"],
+    high: ["\u12A8\u134D\u1270\u129B"],
+    extraHigh: ["\u12A5\u1305\u130D \u12A8\u134D\u1270\u129B"],
+    standard: ["\u1218\u12F0\u1260\u129B"],
+    fast: ["\u1348\u1323\u1295"]
+  },
   composerTextbox: ["\u12A8ChatGPT \u130B\u122D \u12ED\u12C8\u12EB\u12E9"],
   sendButton: ["\u1325\u12EB\u1244 \u120B\u12AD"],
   searchChatsButton: ["\u12CD\u12ED\u12ED\u1276\u127D\u1295 \u1348\u120D\u130D"],
@@ -451,11 +604,25 @@ var am = {
     create_image: ["\u121D\u1235\u120D \u134D\u1320\u122D"]
   },
   signedInMarkers: ["\u12A0\u12F2\u1235 \u12CD\u12ED\u12ED\u1275", "\u12CD\u12ED\u12ED\u1276\u127D\u1295 \u1348\u120D\u130D", "\u12E8\u1245\u122D\u1265 \u130A\u12DC\u12CE\u127D", "\u120B\u12ED\u1265\u1228\u122A", "\u1355\u122E\u1300\u12AD\u1276\u127D", "\u12A8ChatGPT \u130B\u122D \u12ED\u12C8\u12EB\u12E9"],
-  responseActions: ["\u121D\u120B\u1239\u1295 \u12ED\u1245\u12F1"]
+  responseActions: ["\u121D\u120B\u1239\u1295 \u12ED\u1245\u12F1"],
+  stopControl: ["\u1218\u120D\u1235 \u1218\u1235\u1320\u1275 \u12A0\u1241\u121D"]
 };
 
 // src/dom/locale/ar.ts
 var ar = {
+  configurationAxes: {
+    model: ["\u0627\u0644\u0646\u0645\u0648\u0630\u062C"],
+    effort: ["\u0627\u0644\u062C\u0647\u062F"],
+    speed: ["\u0627\u0644\u0633\u0631\u0639\u0629"]
+  },
+  configurationOptions: {
+    light: ["\u062E\u0641\u064A\u0641"],
+    medium: ["\u0645\u062A\u0648\u0633\u0637"],
+    high: ["\u0639\u0627\u0644\u064D"],
+    extraHigh: ["\u0639\u0627\u0644\u064D \u062C\u062F\u064B\u0627"],
+    standard: ["\u0642\u064A\u0627\u0633\u064A"],
+    fast: ["\u0633\u0631\u064A\u0639"]
+  },
   composerTextbox: ["\u0627\u0644\u062F\u0631\u062F\u0634\u0629 \u0645\u0639 ChatGPT"],
   sendButton: ["\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0633\u0624\u0627\u0644"],
   searchChatsButton: ["\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u062F\u0631\u062F\u0634\u0627\u062A"],
@@ -465,12 +632,12 @@ var ar = {
   addFilesOpenerCandidates: ["\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0648\u0627\u0644\u0645\u0632\u064A\u062F"],
   addPhotosFilesMenuItem: ["\u0625\u0636\u0627\u0641\u0629 \u0635\u0648\u0631 \u0648\u0645\u0644\u0641\u0627\u062A"],
   copyResponse: ["\u0646\u0633\u062E \u0625\u062C\u0627\u0628\u0629"],
-  modeLabels: ["\u0641\u0648\u0631\u064A", "\u0645\u062A\u0648\u0633\u0637", "\u0639\u0627\u0644\u064A", "\u0645\u0643\u062B\u0641 \u062C\u062F\u064B\u0627", "\u0627\u062D\u062A\u0631\u0627\u0641\u064A"],
+  modeLabels: ["\u0641\u0648\u0631\u064A", "\u0645\u062A\u0648\u0633\u0637", "\u0639\u0627\u0644\u064A", "\u0645\u0643\u062B\u0641 \u062C\u062F\u064B\u0627", "\u0627\u062D\u062A\u0631\u0627\u0641\u064A", "\u0639\u0627\u0644\u064D", "\u0639\u0627\u0644\u064D \u062C\u062F\u064B\u0627"],
   modeOptions: {
     instant: ["\u0641\u0648\u0631\u064A"],
     medium: ["\u0645\u062A\u0648\u0633\u0637"],
-    high: ["\u0639\u0627\u0644\u064A"],
-    extraHigh: ["\u0645\u0643\u062B\u0641 \u062C\u062F\u064B\u0627"],
+    high: ["\u0639\u0627\u0644\u064A", "\u0639\u0627\u0644\u064D"],
+    extraHigh: ["\u0645\u0643\u062B\u0641 \u062C\u062F\u064B\u0627", "\u0639\u0627\u0644\u064D \u062C\u062F\u064B\u0627"],
     pro: ["\u0627\u062D\u062A\u0631\u0627\u0641\u064A"]
   },
   modeOpenerExtra: ["\u062A\u0643\u0648\u064A\u0646"],
@@ -480,11 +647,25 @@ var ar = {
     create_image: ["\u0625\u0646\u0634\u0627\u0621 \u0635\u0648\u0631\u0629"]
   },
   signedInMarkers: ["\u062F\u0631\u062F\u0634\u0629 \u062C\u062F\u064A\u062F\u0629", "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u062F\u0631\u062F\u0634\u0627\u062A", "\u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A \u0627\u0644\u0623\u062E\u064A\u0631\u0629", "\u0627\u0644\u0645\u0643\u062A\u0628\u0629", "\u0627\u0644\u0645\u0634\u0631\u0648\u0639\u0627\u062A", "\u0627\u0644\u062F\u0631\u062F\u0634\u0629 \u0645\u0639 ChatGPT"],
-  responseActions: ["\u0646\u0633\u062E \u0625\u062C\u0627\u0628\u0629"]
+  responseActions: ["\u0646\u0633\u062E \u0625\u062C\u0627\u0628\u0629"],
+  stopControl: ["\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u0631\u062F"]
 };
 
 // src/dom/locale/bg.ts
 var bg = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B"],
+    effort: ["\u0423\u0441\u0438\u043B\u0438\u0435"],
+    speed: ["\u0421\u043A\u043E\u0440\u043E\u0441\u0442"]
+  },
+  configurationOptions: {
+    light: ["\u041A\u0440\u0430\u0442\u043A\u043E"],
+    medium: ["\u0421\u0440\u0435\u0434\u043D\u043E"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u043E"],
+    extraHigh: ["\u041C\u043D\u043E\u0433\u043E \u0432\u0438\u0441\u043E\u043A\u043E"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E"],
+    fast: ["\u0411\u044A\u0440\u0437\u0430"]
+  },
   composerTextbox: ["\u0427\u0430\u0442 \u0441 ChatGPT"],
   sendButton: ["\u0418\u0437\u043F\u0440\u0430\u0449\u0430\u043D\u0435 \u043D\u0430 \u043F\u043E\u0434\u043A\u0430\u043D\u0430"],
   searchChatsButton: ["\u0422\u044A\u0440\u0441\u0435\u043D\u0435 \u043D\u0430 \u0447\u0430\u0442\u043E\u0432\u0435"],
@@ -494,11 +675,11 @@ var bg = {
   addFilesOpenerCandidates: ["\u0414\u043E\u0431\u0430\u0432\u044F\u043D\u0435 \u043D\u0430 \u0444\u0430\u0439\u043B\u043E\u0432\u0435 \u0438 \u0434\u0440."],
   addPhotosFilesMenuItem: ["\u0414\u043E\u0431\u0430\u0432\u044F\u043D\u0435 \u043D\u0430 \u0441\u043D\u0438\u043C\u043A\u0438 \u0438 \u0444\u0430\u0439\u043B\u043E\u0432\u0435"],
   copyResponse: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0439\u0442\u0435 \u043E\u0442\u0433\u043E\u0432\u043E\u0440\u0430"],
-  modeLabels: ["\u041C\u0438\u0433\u043D\u043E\u0432\u0435\u043D", "\u0421\u0440\u0435\u0434\u0435\u043D", "\u0412\u0438\u0441\u043E\u043A", "\u041C\u043D\u043E\u0433\u043E \u0432\u0438\u0441\u043E\u043A\u043E", "\u041F\u0440\u043E"],
+  modeLabels: ["\u041C\u0438\u0433\u043D\u043E\u0432\u0435\u043D", "\u0421\u0440\u0435\u0434\u0435\u043D", "\u0412\u0438\u0441\u043E\u043A", "\u041C\u043D\u043E\u0433\u043E \u0432\u0438\u0441\u043E\u043A\u043E", "\u041F\u0440\u043E", "\u0421\u0440\u0435\u0434\u043D\u043E", "\u0412\u0438\u0441\u043E\u043A\u043E"],
   modeOptions: {
     instant: ["\u041C\u0438\u0433\u043D\u043E\u0432\u0435\u043D"],
-    medium: ["\u0421\u0440\u0435\u0434\u0435\u043D"],
-    high: ["\u0412\u0438\u0441\u043E\u043A"],
+    medium: ["\u0421\u0440\u0435\u0434\u0435\u043D", "\u0421\u0440\u0435\u0434\u043D\u043E"],
+    high: ["\u0412\u0438\u0441\u043E\u043A", "\u0412\u0438\u0441\u043E\u043A\u043E"],
     extraHigh: ["\u041C\u043D\u043E\u0433\u043E \u0432\u0438\u0441\u043E\u043A\u043E"],
     pro: ["\u041F\u0440\u043E"]
   },
@@ -509,11 +690,24 @@ var bg = {
     create_image: ["\u0421\u044A\u0437\u0434\u0430\u0432\u0430\u043D\u0435 \u043D\u0430 \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435"]
   },
   signedInMarkers: ["\u041D\u043E\u0432 \u0447\u0430\u0442", "\u0422\u044A\u0440\u0441\u0435\u043D\u0435 \u043D\u0430 \u0447\u0430\u0442\u043E\u0432\u0435", "\u0421\u043A\u043E\u0440\u043E\u0448\u043D\u0438 \u0447\u0430\u0442\u043E\u0432\u0435", "\u041A\u0430\u0442\u0430\u043B\u043E\u0433", "\u041F\u0440\u043E\u0435\u043A\u0442\u0438", "\u0427\u0430\u0442 \u0441 ChatGPT"],
-  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0439\u0442\u0435 \u043E\u0442\u0433\u043E\u0432\u043E\u0440\u0430"]
+  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0439\u0442\u0435 \u043E\u0442\u0433\u043E\u0432\u043E\u0440\u0430"],
+  stopControl: ["\u0421\u043F\u0440\u0438 \u043E\u0442\u0433\u043E\u0432\u043E\u0440\u0430"]
 };
 
 // src/dom/locale/bs.ts
 var bs = {
+  configurationAxes: {
+    effort: ["Napor"],
+    speed: ["Brzina"]
+  },
+  configurationOptions: {
+    light: ["Lagano"],
+    medium: ["Srednja"],
+    high: ["Visoka"],
+    extraHigh: ["Veoma visoka"],
+    standard: ["Standardno"],
+    fast: ["Brzo"]
+  },
   composerTextbox: ["Razgovarajte pomo\u0107u ChatGPT-a"],
   sendButton: ["Po\u0161alji upit"],
   searchChatsButton: ["Pretra\u017Ei razgovore"],
@@ -523,12 +717,12 @@ var bs = {
   addFilesOpenerCandidates: ["Otpremite datoteke i jo\u0161 mnogo toga"],
   addPhotosFilesMenuItem: ["Dodaj slike i datoteke"],
   copyResponse: ["Kopiraj odgovor"],
-  modeLabels: ["Brzo", "Srednji", "Visoko", "Vrlo visoko"],
+  modeLabels: ["Brzo", "Srednji", "Visoko", "Vrlo visoko", "Srednja", "Visoka", "Veoma visoka"],
   modeOptions: {
     instant: ["Brzo"],
-    medium: ["Srednji"],
-    high: ["Visoko"],
-    extraHigh: ["Vrlo visoko"]
+    medium: ["Srednji", "Srednja"],
+    high: ["Visoko", "Visoka"],
+    extraHigh: ["Vrlo visoko", "Veoma visoka"]
   },
   modeOpenerExtra: ["Podesi"],
   tools: {
@@ -537,11 +731,24 @@ var bs = {
     create_image: ["Kreirajte sliku"]
   },
   signedInMarkers: ["Novi razgovor", "Pretra\u017Ei razgovore", "Nedavno", "Biblioteka", "Projekti", "Razgovarajte pomo\u0107u ChatGPT-a"],
-  responseActions: ["Kopiraj odgovor"]
+  responseActions: ["Kopiraj odgovor"],
+  stopControl: ["Zaustavi odgovaranje"]
 };
 
 // src/dom/locale/ca.ts
 var ca = {
+  configurationAxes: {
+    effort: ["Esfor\xE7"],
+    speed: ["Velocitat"]
+  },
+  configurationOptions: {
+    light: ["Lleuger"],
+    medium: ["Mitjana"],
+    high: ["Alta"],
+    extraHigh: ["Molt alta"],
+    standard: ["Est\xE0ndard"],
+    fast: ["R\xE0pid"]
+  },
   composerTextbox: ["Xateja amb el ChatGPT"],
   sendButton: ["Envia la indicaci\xF3"],
   searchChatsButton: ["Cerca xats"],
@@ -551,12 +758,12 @@ var ca = {
   addFilesOpenerCandidates: ["Afegeix fitxers i m\xE9s"],
   addPhotosFilesMenuItem: ["Afegeix fotos i fitxers"],
   copyResponse: ["Copia la resposta"],
-  modeLabels: ["Instantani", "Mitj\xE0", "Alt", "Molt alt"],
+  modeLabels: ["Instantani", "Mitj\xE0", "Alt", "Molt alt", "Instant\xE0nia", "Mitjana", "Alta", "Molt alta"],
   modeOptions: {
-    instant: ["Instantani"],
-    medium: ["Mitj\xE0"],
-    high: ["Alt"],
-    extraHigh: ["Molt alt"]
+    instant: ["Instantani", "Instant\xE0nia"],
+    medium: ["Mitj\xE0", "Mitjana"],
+    high: ["Alt", "Alta"],
+    extraHigh: ["Molt alt", "Molt alta"]
   },
   modeOpenerExtra: ["Configura\u2026"],
   tools: {
@@ -565,11 +772,24 @@ var ca = {
     create_image: ["Crea una imatge"]
   },
   signedInMarkers: ["Xat nou", "Cerca xats", "Recents", "Hist\xF2ria de xats", "Projectes", "Xateja amb el ChatGPT"],
-  responseActions: ["Copia la resposta"]
+  responseActions: ["Copia la resposta"],
+  stopControl: ["Atura la resposta"]
 };
 
 // src/dom/locale/cs.ts
 var cs = {
+  configurationAxes: {
+    effort: ["\xDAsil\xED"],
+    speed: ["Rychlost"]
+  },
+  configurationOptions: {
+    light: ["N\xEDzk\xE1"],
+    medium: ["St\u0159edn\xED"],
+    high: ["Vysok\xE1"],
+    extraHigh: ["Velmi vysok\xE1"],
+    standard: ["Standardn\xED"],
+    fast: ["Rychl\xE9"]
+  },
   composerTextbox: ["Chatovat s ChatGPT"],
   sendButton: ["Odeslat v\xFDzvu"],
   searchChatsButton: ["Hledat chaty"],
@@ -593,11 +813,23 @@ var cs = {
     create_image: ["Vytvo\u0159 obr\xE1zek"]
   },
   signedInMarkers: ["Nov\xFD chat", "Hledat chaty", "Ned\xE1vn\xE9", "Historie chatu", "Projekty", "Chatovat s ChatGPT"],
-  responseActions: ["Zkop\xEDrovat odpov\u011B\u010F"]
+  responseActions: ["Zkop\xEDrovat odpov\u011B\u010F"],
+  stopControl: ["Zastavit odpov\xEDd\xE1n\xED"]
 };
 
 // src/dom/locale/da.ts
 var da = {
+  configurationAxes: {
+    effort: ["Indsats"],
+    speed: ["Hastighed"]
+  },
+  configurationOptions: {
+    light: ["Let"],
+    medium: ["Mellem"],
+    high: ["H\xF8j"],
+    extraHigh: ["Ekstra h\xF8j"],
+    fast: ["Hurtig"]
+  },
   composerTextbox: ["Chat med ChatGPT"],
   sendButton: ["Send foresp\xF8rgsel"],
   searchChatsButton: ["S\xF8g i chats"],
@@ -607,9 +839,10 @@ var da = {
   addFilesOpenerCandidates: ["Tilf\xF8j filer og mere"],
   addPhotosFilesMenuItem: ["Tilf\xF8j billeder og filer"],
   copyResponse: ["Kopi\xE9r svar"],
-  modeLabels: ["\xD8jeblikkeligt", "H\xF8j", "Ekstra h\xF8j"],
+  modeLabels: ["\xD8jeblikkeligt", "H\xF8j", "Ekstra h\xF8j", "Mellem"],
   modeOptions: {
     instant: ["\xD8jeblikkeligt"],
+    medium: ["Mellem"],
     high: ["H\xF8j"],
     extraHigh: ["Ekstra h\xF8j"]
   },
@@ -620,11 +853,25 @@ var da = {
     create_image: ["Lav et billede"]
   },
   signedInMarkers: ["Ny chat", "S\xF8g i chats", "Seneste", "Chathistorik", "Projekter", "Chat med ChatGPT"],
-  responseActions: ["Kopi\xE9r svar"]
+  responseActions: ["Kopi\xE9r svar"],
+  stopControl: ["Afbryd svar"]
 };
 
 // src/dom/locale/el.ts
 var el = {
+  configurationAxes: {
+    model: ["\u039C\u03BF\u03BD\u03C4\u03AD\u03BB\u03BF"],
+    effort: ["\u03A0\u03C1\u03BF\u03C3\u03C0\u03AC\u03B8\u03B5\u03B9\u03B1"],
+    speed: ["\u03A4\u03B1\u03C7\u03CD\u03C4\u03B7\u03C4\u03B1"]
+  },
+  configurationOptions: {
+    light: ["\u0395\u03BB\u03B1\u03C6\u03C1\u03B9\u03AC"],
+    medium: ["\u039C\u03B5\u03C3\u03B1\u03AF\u03BF"],
+    high: ["\u03A5\u03C8\u03B7\u03BB\u03CC"],
+    extraHigh: ["\u03A0\u03BF\u03BB\u03CD \u03C5\u03C8\u03B7\u03BB\u03CC"],
+    standard: ["\u03A4\u03C5\u03C0\u03B9\u03BA\u03CC"],
+    fast: ["\u0393\u03C1\u03AE\u03B3\u03BF\u03C1\u03BF"]
+  },
   composerTextbox: ["\u03A3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03AF\u03B1 \u03BC\u03B5 \u03C4\u03BF ChatGPT"],
   sendButton: ["\u0391\u03C0\u03BF\u03C3\u03C4\u03BF\u03BB\u03AE \u03C0\u03C1\u03BF\u03C4\u03C1\u03BF\u03C0\u03AE\u03C2"],
   searchChatsButton: ["\u0391\u03BD\u03B1\u03B6\u03AE\u03C4\u03B7\u03C3\u03B7 \u03C3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03B9\u03CE\u03BD"],
@@ -634,11 +881,11 @@ var el = {
   addFilesOpenerCandidates: ["\u03A0\u03C1\u03BF\u03C3\u03B8\u03AE\u03BA\u03B7 \u03B1\u03C1\u03C7\u03B5\u03AF\u03C9\u03BD \u03BA\u03B1\u03B9 \u03AC\u03BB\u03BB\u03B1"],
   addPhotosFilesMenuItem: ["\u03A0\u03C1\u03BF\u03C3\u03B8\u03AE\u03BA\u03B7 \u03C6\u03C9\u03C4\u03BF\u03B3\u03C1\u03B1\u03C6\u03B9\u03CE\u03BD & \u03B1\u03C1\u03C7\u03B5\u03AF\u03C9\u03BD"],
   copyResponse: ["\u0391\u03BD\u03C4\u03B9\u03B3\u03C1\u03B1\u03C6\u03AE \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03B7\u03C2"],
-  modeLabels: ["\u0386\u03BC\u03B5\u03C3\u03B7", "\u039C\u03B5\u03C3\u03B1\u03AF\u03B1", "\u03A5\u03C8\u03B7\u03BB\u03AE", "\u03A0\u03BF\u03BB\u03CD \u03C5\u03C8\u03B7\u03BB\u03CC"],
+  modeLabels: ["\u0386\u03BC\u03B5\u03C3\u03B7", "\u039C\u03B5\u03C3\u03B1\u03AF\u03B1", "\u03A5\u03C8\u03B7\u03BB\u03AE", "\u03A0\u03BF\u03BB\u03CD \u03C5\u03C8\u03B7\u03BB\u03CC", "\u039C\u03B5\u03C3\u03B1\u03AF\u03BF", "\u03A5\u03C8\u03B7\u03BB\u03CC"],
   modeOptions: {
     instant: ["\u0386\u03BC\u03B5\u03C3\u03B7"],
-    medium: ["\u039C\u03B5\u03C3\u03B1\u03AF\u03B1"],
-    high: ["\u03A5\u03C8\u03B7\u03BB\u03AE"],
+    medium: ["\u039C\u03B5\u03C3\u03B1\u03AF\u03B1", "\u039C\u03B5\u03C3\u03B1\u03AF\u03BF"],
+    high: ["\u03A5\u03C8\u03B7\u03BB\u03AE", "\u03A5\u03C8\u03B7\u03BB\u03CC"],
     extraHigh: ["\u03A0\u03BF\u03BB\u03CD \u03C5\u03C8\u03B7\u03BB\u03CC"]
   },
   modeOpenerExtra: ["\u0394\u03B9\u03B1\u03BC\u03CC\u03C1\u03C6\u03C9\u03C3\u03B7\u2026"],
@@ -648,11 +895,25 @@ var el = {
     create_image: ["\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B5\u03B9\u03BA\u03CC\u03BD\u03B1\u03C2"]
   },
   signedInMarkers: ["\u039D\u03AD\u03B1 \u03C3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03AF\u03B1", "\u0391\u03BD\u03B1\u03B6\u03AE\u03C4\u03B7\u03C3\u03B7 \u03C3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03B9\u03CE\u03BD", "\u03A0\u03C1\u03CC\u03C3\u03C6\u03B1\u03C4\u03B5\u03C2", "\u0399\u03C3\u03C4\u03BF\u03C1\u03B9\u03BA\u03CC \u03C3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03B9\u03CE\u03BD", "\u0388\u03C1\u03B3\u03B1", "\u03A3\u03C5\u03BD\u03BF\u03BC\u03B9\u03BB\u03AF\u03B1 \u03BC\u03B5 \u03C4\u03BF ChatGPT"],
-  responseActions: ["\u0391\u03BD\u03C4\u03B9\u03B3\u03C1\u03B1\u03C6\u03AE \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03B7\u03C2"]
+  responseActions: ["\u0391\u03BD\u03C4\u03B9\u03B3\u03C1\u03B1\u03C6\u03AE \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03B7\u03C2"],
+  stopControl: ["\u0394\u03B9\u03B1\u03BA\u03BF\u03C0\u03AE \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03B7\u03C2"]
 };
 
 // src/dom/locale/es-419.ts
 var es419 = {
+  configurationAxes: {
+    model: ["Modelo"],
+    effort: ["Esfuerzo"],
+    speed: ["Velocidad"]
+  },
+  configurationOptions: {
+    light: ["M\xEDnimo"],
+    medium: ["Media"],
+    high: ["Alta"],
+    extraHigh: ["Muy alta"],
+    standard: ["Est\xE1ndar"],
+    fast: ["R\xE1pido"]
+  },
   composerTextbox: ["Chatear con ChatGPT"],
   sendButton: ["Enviar mensaje"],
   searchChatsButton: ["Buscar chats"],
@@ -676,11 +937,24 @@ var es419 = {
     create_image: ["Crea una imagen"]
   },
   signedInMarkers: ["Nuevo chat", "Buscar chats", "Recientes", "Historial del chat", "Proyectos", "Chatear con ChatGPT"],
-  responseActions: ["Copiar respuesta"]
+  responseActions: ["Copiar respuesta"],
+  stopControl: ["Detener respuesta"]
 };
 
 // src/dom/locale/et.ts
 var et = {
+  configurationAxes: {
+    model: ["Mudel"],
+    effort: ["Pingutus"],
+    speed: ["Kiirus"]
+  },
+  configurationOptions: {
+    light: ["Kerge"],
+    medium: ["Keskmine"],
+    high: ["K\xF5rge"],
+    extraHigh: ["V\xE4ga k\xF5rge"],
+    fast: ["Kiire"]
+  },
   composerTextbox: ["Vestle ChatGPT-ga"],
   sendButton: ["Saada viip"],
   searchChatsButton: ["Otsi vestlusi"],
@@ -704,11 +978,24 @@ var et = {
     create_image: ["Loo pilt"]
   },
   signedInMarkers: ["Uus vestlus", "Otsi vestlusi", "Hiljutised", "Vestlusajalugu", "Projektid", "Vestle ChatGPT-ga"],
-  responseActions: ["Kopeeri vastus"]
+  responseActions: ["Kopeeri vastus"],
+  stopControl: ["Peata vastamine"]
 };
 
 // src/dom/locale/fa.ts
 var fa = {
+  configurationAxes: {
+    model: ["\u0645\u062F\u0644"],
+    effort: ["\u0633\u0637\u062D \u062A\u0644\u0627\u0634"],
+    speed: ["\u0633\u0631\u0639\u062A"]
+  },
+  configurationOptions: {
+    light: ["\u0633\u0628\u06A9"],
+    medium: ["\u0645\u062A\u0648\u0633\u0637"],
+    high: ["\u0628\u0627\u0644\u0627"],
+    extraHigh: ["\u0628\u0633\u06CC\u0627\u0631 \u0628\u0627\u0644\u0627"],
+    fast: ["\u0633\u0631\u06CC\u0639"]
+  },
   composerTextbox: ["\u06AF\u0641\u062A\u06AF\u0648 \u0628\u0627 ChatGPT"],
   sendButton: ["\u0627\u0631\u0633\u0627\u0644 \u062F\u0633\u062A\u0648\u0631"],
   searchChatsButton: ["\u062C\u0633\u062A\u200C\u0648\u062C\u0648\u06CC \u0686\u062A\u200C\u0647\u0627"],
@@ -718,12 +1005,12 @@ var fa = {
   addFilesOpenerCandidates: ["\u0627\u0641\u0632\u0648\u062F\u0646 \u0641\u0627\u06CC\u0644\u200C\u0647\u0627 \u0648 \u0645\u0648\u0627\u0631\u062F \u0628\u06CC\u0634\u062A\u0631"],
   addPhotosFilesMenuItem: ["\u0627\u0641\u0632\u0648\u062F\u0646 \u062A\u0635\u0627\u0648\u06CC\u0631 \u0648 \u0641\u0627\u06CC\u0644\u200C\u0647\u0627"],
   copyResponse: ["\u06A9\u067E\u06CC \u06A9\u0631\u062F\u0646 \u067E\u0627\u0633\u062E"],
-  modeLabels: ["\u0641\u0648\u0631\u06CC", "\u0645\u062A\u0648\u0633\u0637", "\u0628\u0627\u0644\u0627", "\u0628\u0633\u06CC\u0627\u0631 \u0632\u06CC\u0627\u062F", "\u062D\u0631\u0641\u0647\u200C\u0627\u06CC"],
+  modeLabels: ["\u0641\u0648\u0631\u06CC", "\u0645\u062A\u0648\u0633\u0637", "\u0628\u0627\u0644\u0627", "\u0628\u0633\u06CC\u0627\u0631 \u0632\u06CC\u0627\u062F", "\u062D\u0631\u0641\u0647\u200C\u0627\u06CC", "\u0628\u0633\u06CC\u0627\u0631 \u0628\u0627\u0644\u0627"],
   modeOptions: {
     instant: ["\u0641\u0648\u0631\u06CC"],
     medium: ["\u0645\u062A\u0648\u0633\u0637"],
     high: ["\u0628\u0627\u0644\u0627"],
-    extraHigh: ["\u0628\u0633\u06CC\u0627\u0631 \u0632\u06CC\u0627\u062F"],
+    extraHigh: ["\u0628\u0633\u06CC\u0627\u0631 \u0632\u06CC\u0627\u062F", "\u0628\u0633\u06CC\u0627\u0631 \u0628\u0627\u0644\u0627"],
     pro: ["\u062D\u0631\u0641\u0647\u200C\u0627\u06CC"]
   },
   modeOpenerExtra: ["\u067E\u06CC\u06A9\u0631\u0628\u0646\u062F\u06CC..."],
@@ -733,11 +1020,25 @@ var fa = {
     create_image: ["\u0627\u06CC\u062C\u0627\u062F \u062A\u0635\u0648\u06CC\u0631"]
   },
   signedInMarkers: ["\u06AF\u0641\u062A\u06AF\u0648\u06CC \u062C\u062F\u06CC\u062F", "\u062C\u0633\u062A\u200C\u0648\u062C\u0648\u06CC \u0686\u062A\u200C\u0647\u0627", "\u0645\u0648\u0627\u0631\u062F \u0627\u062E\u06CC\u0631", "\u062A\u0627\u0631\u06CC\u062E\u0686\u0647 \u06AF\u0641\u062A\u06AF\u0648", "\u067E\u0631\u0648\u0698\u0647\u200C\u0647\u0627", "\u06AF\u0641\u062A\u06AF\u0648 \u0628\u0627 ChatGPT"],
-  responseActions: ["\u06A9\u067E\u06CC \u06A9\u0631\u062F\u0646 \u067E\u0627\u0633\u062E"]
+  responseActions: ["\u06A9\u067E\u06CC \u06A9\u0631\u062F\u0646 \u067E\u0627\u0633\u062E"],
+  stopControl: ["\u062A\u0648\u0642\u0641 \u067E\u0627\u0633\u062E \u06AF\u0648\u06CC\u06CC"]
 };
 
 // src/dom/locale/fi.ts
 var fi = {
+  configurationAxes: {
+    model: ["Malli"],
+    effort: ["M\xE4\xE4r\xE4"],
+    speed: ["Nopeus"]
+  },
+  configurationOptions: {
+    light: ["Kevyt"],
+    medium: ["Keskitaso"],
+    high: ["Korkea"],
+    extraHigh: ["Eritt\xE4in korkea"],
+    standard: ["Perustaso"],
+    fast: ["Nopea"]
+  },
   composerTextbox: ["Keskustele ChatGPT:n kanssa"],
   sendButton: ["L\xE4het\xE4 kehote"],
   searchChatsButton: ["Hae keskusteluista"],
@@ -761,11 +1062,23 @@ var fi = {
     create_image: ["Luo kuva"]
   },
   signedInMarkers: ["Uusi keskustelu", "Hae keskusteluista", "\xC4skett\xE4iset", "Keskusteluhistoria", "Projektit", "Keskustele ChatGPT:n kanssa"],
-  responseActions: ["Kopioi vastaus"]
+  responseActions: ["Kopioi vastaus"],
+  stopControl: ["Lopeta vastaaminen"]
 };
 
 // src/dom/locale/fr-CA.ts
 var frCA = {
+  configurationAxes: {
+    model: ["Mod\xE8le"],
+    speed: ["Vitesse"]
+  },
+  configurationOptions: {
+    light: ["L\xE9ger"],
+    medium: ["Moyen"],
+    high: ["\xC9lev\xE9"],
+    extraHigh: ["Tr\xE8s \xE9lev\xE9"],
+    fast: ["Rapide"]
+  },
   composerTextbox: ["Converser avec ChatGPT"],
   sendButton: ["Envoyer la requ\xEAte"],
   searchChatsButton: ["Rechercher les clavardages"],
@@ -789,11 +1102,25 @@ var frCA = {
     create_image: ["Cr\xE9er une image"]
   },
   signedInMarkers: ["Nouvelle session de clavardage", "Rechercher les clavardages", "R\xE9centes", "Historique des clavardages", "Projets", "Converser avec ChatGPT"],
-  responseActions: ["Copier la r\xE9ponse"]
+  responseActions: ["Copier la r\xE9ponse"],
+  stopControl: ["Arr\xEAter de r\xE9pondre"]
 };
 
 // src/dom/locale/gu.ts
 var gu = {
+  configurationAxes: {
+    model: ["\u0AAE\u0ACB\u0AA1\u0AC7\u0AB2"],
+    effort: ["\u0AAA\u0ACD\u0AB0\u0AAF\u0ABE\u0AB8"],
+    speed: ["\u0A9D\u0AA1\u0AAA"]
+  },
+  configurationOptions: {
+    light: ["\u0AB2\u0ABE\u0A87\u0A9F"],
+    medium: ["\u0AAE\u0AC0\u0AA1\u0ABF\u0AAF\u0AAE"],
+    high: ["\u0AB9\u0ABE\u0A87"],
+    extraHigh: ["\u0A8F\u0A95\u0ACD\u0AB8\u0ACD\u0A9F\u0ACD\u0AB0\u0ABE \u0AB9\u0ABE\u0A87"],
+    standard: ["\u0AB8\u0ACD\u0A9F\u0ABE\u0AA8\u0ACD\u0AA1\u0AB0\u0ACD\u0AA1"],
+    fast: ["\u0A9D\u0AA1\u0AAA\u0AC0"]
+  },
   composerTextbox: ["ChatGPT \u0AB8\u0ABE\u0AA5\u0AC7 \u0A9A\u0AC5\u0A9F"],
   sendButton: ["\u0AAA\u0ACD\u0AB0\u0ACB\u0AAE\u0ACD\u0AAA\u0ACD\u0A9F \u0AAE\u0ACB\u0A95\u0AB2\u0ACB"],
   searchChatsButton: ["\u0A9A\u0AC7\u0A9F \u0AB6\u0ACB\u0AA7\u0ACB"],
@@ -803,12 +1130,12 @@ var gu = {
   addFilesOpenerCandidates: ["\u0AAB\u0ABE\u0A87\u0AB2\u0ACB \u0A85\u0AA8\u0AC7 \u0AB5\u0AA7\u0AC1 \u0A89\u0AAE\u0AC7\u0AB0\u0ACB"],
   addPhotosFilesMenuItem: ["\u0AAB\u0ACB\u0A9F\u0ABE \u0A85\u0AA8\u0AC7 \u0AAB\u0ABE\u0A87\u0AB2\u0ACB \u0A89\u0AAE\u0AC7\u0AB0\u0ACB"],
   copyResponse: ["\u0AAA\u0ACD\u0AB0\u0AA4\u0ABF\u0AAD\u0ABE\u0AB5 \u0A95\u0AC9\u0AAA\u0ABF \u0A95\u0AB0\u0ACB"],
-  modeLabels: ["\u0AA4\u0AB0\u0AA4", "\u0AAE\u0AA7\u0ACD\u0AAF\u0AAE", "\u0A89\u0A9A\u0ACD\u0A9A", "\u0A85\u0AA4\u0ABF \u0A89\u0A9A\u0ACD\u0A9A"],
+  modeLabels: ["\u0AA4\u0AB0\u0AA4", "\u0AAE\u0AA7\u0ACD\u0AAF\u0AAE", "\u0A89\u0A9A\u0ACD\u0A9A", "\u0A85\u0AA4\u0ABF \u0A89\u0A9A\u0ACD\u0A9A", "\u0AAE\u0AC0\u0AA1\u0ABF\u0AAF\u0AAE", "\u0AB9\u0ABE\u0A87", "\u0A8F\u0A95\u0ACD\u0AB8\u0ACD\u0A9F\u0ACD\u0AB0\u0ABE \u0AB9\u0ABE\u0A87"],
   modeOptions: {
     instant: ["\u0AA4\u0AB0\u0AA4"],
-    medium: ["\u0AAE\u0AA7\u0ACD\u0AAF\u0AAE"],
-    high: ["\u0A89\u0A9A\u0ACD\u0A9A"],
-    extraHigh: ["\u0A85\u0AA4\u0ABF \u0A89\u0A9A\u0ACD\u0A9A"]
+    medium: ["\u0AAE\u0AA7\u0ACD\u0AAF\u0AAE", "\u0AAE\u0AC0\u0AA1\u0ABF\u0AAF\u0AAE"],
+    high: ["\u0A89\u0A9A\u0ACD\u0A9A", "\u0AB9\u0ABE\u0A87"],
+    extraHigh: ["\u0A85\u0AA4\u0ABF \u0A89\u0A9A\u0ACD\u0A9A", "\u0A8F\u0A95\u0ACD\u0AB8\u0ACD\u0A9F\u0ACD\u0AB0\u0ABE \u0AB9\u0ABE\u0A87"]
   },
   modeOpenerExtra: ["\u0A95\u0AA8\u0ACD\u0AAB\u0ABF\u0A97\u0AB0 \u0A95\u0AB0\u0ACB..."],
   tools: {
@@ -817,11 +1144,25 @@ var gu = {
     create_image: ["\u0A9B\u0AAC\u0AC0 \u0AAC\u0AA8\u0ABE\u0AB5\u0ACB"]
   },
   signedInMarkers: ["\u0AA8\u0AB5\u0AC0 \u0A9A\u0AC7\u0A9F", "\u0A9A\u0AC7\u0A9F \u0AB6\u0ACB\u0AA7\u0ACB", "\u0AA4\u0ABE\u0A9C\u0AC7\u0AA4\u0AB0", "\u0A9A\u0AC7\u0A9F \u0A87\u0AA4\u0ABF\u0AB9\u0ABE\u0AB8", "\u0AAA\u0ACD\u0AB0\u0ACB\u0A9C\u0AC7\u0A95\u0ACD\u0A9F", "ChatGPT \u0AB8\u0ABE\u0AA5\u0AC7 \u0A9A\u0AC5\u0A9F"],
-  responseActions: ["\u0AAA\u0ACD\u0AB0\u0AA4\u0ABF\u0AAD\u0ABE\u0AB5 \u0A95\u0AC9\u0AAA\u0ABF \u0A95\u0AB0\u0ACB"]
+  responseActions: ["\u0AAA\u0ACD\u0AB0\u0AA4\u0ABF\u0AAD\u0ABE\u0AB5 \u0A95\u0AC9\u0AAA\u0ABF \u0A95\u0AB0\u0ACB"],
+  stopControl: ["\u0A9C\u0AB5\u0ABE\u0AAC \u0A86\u0AAA\u0AB5\u0ABE\u0AA8\u0AC1\u0A82 \u0AAC\u0A82\u0AA7 \u0A95\u0AB0\u0ACB"]
 };
 
 // src/dom/locale/hi.ts
 var hi = {
+  configurationAxes: {
+    model: ["\u092E\u0949\u0921\u0932"],
+    effort: ["\u092A\u094D\u0930\u092F\u093E\u0938"],
+    speed: ["\u0917\u0924\u093F"]
+  },
+  configurationOptions: {
+    light: ["\u0932\u093E\u0907\u091F"],
+    medium: ["\u092E\u0927\u094D\u092F\u092E"],
+    high: ["\u0909\u091A\u094D\u091A"],
+    extraHigh: ["\u090F\u0915\u094D\u0938\u094D\u091F\u094D\u0930\u093E \u0939\u093E\u0908"],
+    standard: ["\u0938\u094D\u091F\u0948\u0902\u0921\u0930\u094D\u0921"],
+    fast: ["\u0924\u0947\u091C\u093C"]
+  },
   composerTextbox: ["ChatGPT \u0915\u0947 \u0938\u093E\u0925 \u091A\u0948\u091F \u0915\u0930\u0947\u0902"],
   sendButton: ["\u092A\u094D\u0930\u0949\u092E\u094D\u092A\u094D \u092D\u0947\u091C\u0947\u0902"],
   searchChatsButton: ["\u091A\u0948\u091F \u0916\u094B\u091C\u0947\u0902"],
@@ -831,12 +1172,12 @@ var hi = {
   addFilesOpenerCandidates: ["\u092B\u093C\u093E\u0907\u0932\u094B\u0902 \u0915\u094B \u091C\u094B\u0921\u093C\u0947\u0902 \u0914\u0930 \u092D\u0940 \u092C\u0939\u0941\u0924 \u0915\u0941\u091B \u0915\u0930\u0947\u0902"],
   addPhotosFilesMenuItem: ["\u092B\u093C\u094B\u091F\u094B \u0914\u0930 \u092B\u093C\u093E\u0907\u0932\u0947\u0902 \u091C\u094B\u0921\u093C\u0947\u0902"],
   copyResponse: ["\u091C\u0935\u093E\u092C \u0915\u094B \u0915\u0949\u092A\u0940 \u0915\u0930\u0947\u0902"],
-  modeLabels: ["\u0924\u0941\u0930\u0902\u0924", "\u092E\u0927\u094D\u092F\u092E", "\u0909\u091A\u094D\u091A", "\u092C\u0939\u0941\u0924 \u0909\u091A\u094D\u091A"],
+  modeLabels: ["\u0924\u0941\u0930\u0902\u0924", "\u092E\u0927\u094D\u092F\u092E", "\u0909\u091A\u094D\u091A", "\u092C\u0939\u0941\u0924 \u0909\u091A\u094D\u091A", "\u090F\u0915\u094D\u0938\u094D\u091F\u094D\u0930\u093E \u0939\u093E\u0908"],
   modeOptions: {
     instant: ["\u0924\u0941\u0930\u0902\u0924"],
     medium: ["\u092E\u0927\u094D\u092F\u092E"],
     high: ["\u0909\u091A\u094D\u091A"],
-    extraHigh: ["\u092C\u0939\u0941\u0924 \u0909\u091A\u094D\u091A"]
+    extraHigh: ["\u092C\u0939\u0941\u0924 \u0909\u091A\u094D\u091A", "\u090F\u0915\u094D\u0938\u094D\u091F\u094D\u0930\u093E \u0939\u093E\u0908"]
   },
   modeOpenerExtra: ["\u0915\u0949\u0928\u094D\u092B\u093C\u093F\u0917\u0930 \u0915\u0930\u0947\u0902..."],
   tools: {
@@ -845,11 +1186,24 @@ var hi = {
     create_image: ["\u0907\u092E\u0947\u091C \u092C\u0928\u093E\u090F\u0901"]
   },
   signedInMarkers: ["\u0928\u0908 \u091A\u0948\u091F", "\u091A\u0948\u091F \u0916\u094B\u091C\u0947\u0902", "\u0939\u093E\u0932\u093F\u092F\u093E", "\u091A\u0948\u091F \u0939\u093F\u0938\u094D\u091F\u0930\u0940", "\u092A\u094D\u0930\u094B\u091C\u0947\u0915\u094D\u091F\u094D\u0938", "ChatGPT \u0915\u0947 \u0938\u093E\u0925 \u091A\u0948\u091F \u0915\u0930\u0947\u0902"],
-  responseActions: ["\u091C\u0935\u093E\u092C \u0915\u094B \u0915\u0949\u092A\u0940 \u0915\u0930\u0947\u0902"]
+  responseActions: ["\u091C\u0935\u093E\u092C \u0915\u094B \u0915\u0949\u092A\u0940 \u0915\u0930\u0947\u0902"],
+  stopControl: ["\u0909\u0924\u094D\u0924\u0930 \u0930\u094B\u0915\u0947\u0902"]
 };
 
 // src/dom/locale/hr.ts
 var hr = {
+  configurationAxes: {
+    effort: ["Razina napora"],
+    speed: ["Brzina"]
+  },
+  configurationOptions: {
+    light: ["Lagano"],
+    medium: ["Srednja"],
+    high: ["Visoka"],
+    extraHigh: ["Vrlo visoka"],
+    standard: ["Standardno"],
+    fast: ["Brzo"]
+  },
   composerTextbox: ["Razgovor s ChatGPT-om"],
   sendButton: ["Po\u0161alji odzivnik"],
   searchChatsButton: ["Pretra\u017Ei razgovore"],
@@ -859,10 +1213,10 @@ var hr = {
   addFilesOpenerCandidates: ["Dodavanje datoteka i ostalo"],
   addPhotosFilesMenuItem: ["Dodaj fotografije i datoteke"],
   copyResponse: ["Kopiraj odgovor"],
-  modeLabels: ["Srednje", "Visoko", "Vrlo visoka"],
+  modeLabels: ["Srednje", "Visoko", "Vrlo visoka", "Srednja", "Visoka"],
   modeOptions: {
-    medium: ["Srednje"],
-    high: ["Visoko"],
+    medium: ["Srednje", "Srednja"],
+    high: ["Visoko", "Visoka"],
     extraHigh: ["Vrlo visoka"]
   },
   modeOpenerExtra: ["Konfiguriraj\u2026"],
@@ -872,11 +1226,25 @@ var hr = {
     create_image: ["Stvaranje slike"]
   },
   signedInMarkers: ["Novi razgovor", "Pretra\u017Ei razgovore", "Nedavni sadr\u017Eaj", "Povijest razgovora", "Projekti", "Razgovor s ChatGPT-om"],
-  responseActions: ["Kopiraj odgovor"]
+  responseActions: ["Kopiraj odgovor"],
+  stopControl: ["Zaustavi odgovaranje"]
 };
 
 // src/dom/locale/hu.ts
 var hu = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["R\xE1ford\xEDt\xE1s"],
+    speed: ["Sebess\xE9g"]
+  },
+  configurationOptions: {
+    light: ["Egyszer\u0171"],
+    medium: ["K\xF6zepes"],
+    high: ["Er\u0151s"],
+    extraHigh: ["Extra er\u0151s"],
+    standard: ["Norm\xE1l"],
+    fast: ["Gyors"]
+  },
   composerTextbox: ["Cseveg\xE9s a ChatGPT-vel"],
   sendButton: ["Utas\xEDt\xE1s k\xFCld\xE9se"],
   searchChatsButton: ["Besz\xE9lget\xE9sek keres\xE9se"],
@@ -886,12 +1254,12 @@ var hu = {
   addFilesOpenerCandidates: ["F\xE1jlok \xE9s egyebek hozz\xE1ad\xE1sa"],
   addPhotosFilesMenuItem: ["Fot\xF3k \xE9s f\xE1jlok hozz\xE1ad\xE1sa"],
   copyResponse: ["V\xE1lasz m\xE1sol\xE1sa"],
-  modeLabels: ["Azonnali", "K\xF6zepes", "Magas", "Kiemelked\u0151en magas"],
+  modeLabels: ["Azonnali", "K\xF6zepes", "Magas", "Kiemelked\u0151en magas", "Er\u0151s", "Extra er\u0151s"],
   modeOptions: {
     instant: ["Azonnali"],
     medium: ["K\xF6zepes"],
-    high: ["Magas"],
-    extraHigh: ["Kiemelked\u0151en magas"]
+    high: ["Magas", "Er\u0151s"],
+    extraHigh: ["Kiemelked\u0151en magas", "Extra er\u0151s"]
   },
   modeOpenerExtra: ["Konfigur\xE1l\xE1s..."],
   tools: {
@@ -900,11 +1268,25 @@ var hu = {
     create_image: ["K\xE9p l\xE9trehoz\xE1sa"]
   },
   signedInMarkers: ["\xDAj cseveg\xE9s", "Besz\xE9lget\xE9sek keres\xE9se", "Legut\xF3bbiak", "Cseveg\xE9si el\u0151zm\xE9nyek", "Projektek", "Cseveg\xE9s a ChatGPT-vel"],
-  responseActions: ["V\xE1lasz m\xE1sol\xE1sa"]
+  responseActions: ["V\xE1lasz m\xE1sol\xE1sa"],
+  stopControl: ["V\xE1lasz le\xE1ll\xEDt\xE1sa"]
 };
 
 // src/dom/locale/hy.ts
 var hy = {
+  configurationAxes: {
+    model: ["\u0544\u0578\u0564\u0565\u056C"],
+    effort: ["\u054B\u0561\u0576\u0584"],
+    speed: ["\u0531\u0580\u0561\u0563\u0578\u0582\u0569\u0575\u0578\u0582\u0576"]
+  },
+  configurationOptions: {
+    light: ["\u0539\u0565\u0569\u0587"],
+    medium: ["\u0544\u056B\u057B\u056B\u0576"],
+    high: ["\u0540\u0566\u0578\u0580"],
+    extraHigh: ["\u0531\u057E\u0565\u056C\u056B \u0570\u0566\u0578\u0580"],
+    standard: ["\u054D\u057F\u0561\u0576\u0564\u0561\u0580\u057F"],
+    fast: ["\u0531\u0580\u0561\u0563"]
+  },
   composerTextbox: ["\u0536\u0580\u0578\u0582\u0575\u0581 ChatGPT-\u056B \u0570\u0565\u057F"],
   sendButton: ["\u0548\u0582\u0572\u0561\u0580\u056F\u0565\u056C \u0570\u0578\u0582\u0577\u0561\u0576\u056B\u0577"],
   searchChatsButton: ["\u0548\u0580\u0578\u0576\u0565\u056C \u0566\u0580\u0578\u0582\u0575\u0581\u0576\u0565\u0580\u0568"],
@@ -914,12 +1296,12 @@ var hy = {
   addFilesOpenerCandidates: ["\u0531\u057E\u0565\u056C\u0561\u0581\u0580\u0565\u0584 \u0586\u0561\u0575\u056C\u0565\u0580 \u0587 \u0561\u057E\u0565\u056C\u056B\u0576"],
   addPhotosFilesMenuItem: ["\u0531\u057E\u0565\u056C\u0561\u0581\u0576\u0565\u056C \u056C\u0578\u0582\u057D\u0561\u0576\u056F\u0561\u0580\u0576\u0565\u0580 \u0587 \u0586\u0561\u0575\u056C\u0565\u0580"],
   copyResponse: ["\u054A\u0561\u057F\u0573\u0565\u0576\u0565\u056C \u057A\u0561\u057F\u0561\u057D\u056D\u0561\u0576\u0568"],
-  modeLabels: ["\u0531\u056F\u0576\u0569\u0561\u0580\u0569\u0561\u0575\u056B\u0576", "\u0544\u056B\u057B\u056B\u0576", "\u0532\u0561\u0580\u0571\u0580", "\u0547\u0561\u057F \u0562\u0561\u0580\u0571\u0580", "\u054A\u0580\u0578"],
+  modeLabels: ["\u0531\u056F\u0576\u0569\u0561\u0580\u0569\u0561\u0575\u056B\u0576", "\u0544\u056B\u057B\u056B\u0576", "\u0532\u0561\u0580\u0571\u0580", "\u0547\u0561\u057F \u0562\u0561\u0580\u0571\u0580", "\u054A\u0580\u0578", "\u0540\u0566\u0578\u0580", "\u0531\u057E\u0565\u056C\u056B \u0570\u0566\u0578\u0580"],
   modeOptions: {
     instant: ["\u0531\u056F\u0576\u0569\u0561\u0580\u0569\u0561\u0575\u056B\u0576"],
     medium: ["\u0544\u056B\u057B\u056B\u0576"],
-    high: ["\u0532\u0561\u0580\u0571\u0580"],
-    extraHigh: ["\u0547\u0561\u057F \u0562\u0561\u0580\u0571\u0580"],
+    high: ["\u0532\u0561\u0580\u0571\u0580", "\u0540\u0566\u0578\u0580"],
+    extraHigh: ["\u0547\u0561\u057F \u0562\u0561\u0580\u0571\u0580", "\u0531\u057E\u0565\u056C\u056B \u0570\u0566\u0578\u0580"],
     pro: ["\u054A\u0580\u0578"]
   },
   modeOpenerExtra: ["\u053F\u0561\u0566\u0574\u0561\u0571\u0587\u0565\u056C\u2024\u2024\u2024"],
@@ -929,11 +1311,24 @@ var hy = {
     create_image: ["\u054D\u057F\u0565\u0572\u056E\u0565\u056C \u057A\u0561\u057F\u056F\u0565\u0580"]
   },
   signedInMarkers: ["\u0546\u0578\u0580 \u0566\u0580\u0578\u0582\u0575\u0581", "\u0548\u0580\u0578\u0576\u0565\u056C \u0566\u0580\u0578\u0582\u0575\u0581\u0576\u0565\u0580\u0568", "\u0539\u0561\u0580\u0574", "\u0536\u0580\u0578\u0582\u0575\u0581\u0576\u0565\u0580\u056B \u057A\u0561\u057F\u0574\u0578\u0582\u0569\u0575\u0578\u0582\u0576", "\u0546\u0561\u056D\u0561\u0563\u056E\u0565\u0580", "\u0536\u0580\u0578\u0582\u0575\u0581 ChatGPT-\u056B \u0570\u0565\u057F"],
-  responseActions: ["\u054A\u0561\u057F\u0573\u0565\u0576\u0565\u056C \u057A\u0561\u057F\u0561\u057D\u056D\u0561\u0576\u0568"]
+  responseActions: ["\u054A\u0561\u057F\u0573\u0565\u0576\u0565\u056C \u057A\u0561\u057F\u0561\u057D\u056D\u0561\u0576\u0568"],
+  stopControl: ["\u0534\u0561\u0564\u0561\u0580\u0565\u0581\u0576\u0565\u056C \u057A\u0561\u057F\u0561\u057D\u056D\u0561\u0576\u0565\u056C\u0568"]
 };
 
 // src/dom/locale/id.ts
 var id = {
+  configurationAxes: {
+    effort: ["Upaya"],
+    speed: ["Kecepatan"]
+  },
+  configurationOptions: {
+    light: ["Ringan"],
+    medium: ["Sedang"],
+    high: ["Tinggi"],
+    extraHigh: ["Ekstra Tinggi"],
+    standard: ["Standar"],
+    fast: ["Cepat"]
+  },
   composerTextbox: ["Obrolan dengan ChatGPT"],
   sendButton: ["Kirim perintah"],
   searchChatsButton: ["Cari obrolan"],
@@ -943,12 +1338,12 @@ var id = {
   addFilesOpenerCandidates: ["Tambahkan file dan lainnya"],
   addPhotosFilesMenuItem: ["Tambah foto & file"],
   copyResponse: ["Salin respons"],
-  modeLabels: ["Instan", "Sedang", "Tinggi", "Sangat Tinggi"],
+  modeLabels: ["Instan", "Sedang", "Tinggi", "Sangat Tinggi", "Ekstra Tinggi"],
   modeOptions: {
     instant: ["Instan"],
     medium: ["Sedang"],
     high: ["Tinggi"],
-    extraHigh: ["Sangat Tinggi"]
+    extraHigh: ["Sangat Tinggi", "Ekstra Tinggi"]
   },
   modeOpenerExtra: ["Konfigurasi..."],
   tools: {
@@ -957,11 +1352,24 @@ var id = {
     create_image: ["Buat gambar"]
   },
   signedInMarkers: ["Obrolan baru", "Cari obrolan", "Terkini", "Riwayat obrolan", "Proyek", "Obrolan dengan ChatGPT"],
-  responseActions: ["Salin respons"]
+  responseActions: ["Salin respons"],
+  stopControl: ["Hentikan jawaban"]
 };
 
 // src/dom/locale/is.ts
 var is = {
+  configurationAxes: {
+    model: ["L\xEDkan"],
+    effort: ["\xC1reynsla"],
+    speed: ["Hra\xF0i"]
+  },
+  configurationOptions: {
+    light: ["L\xE9tt"],
+    medium: ["Mi\xF0lungs"],
+    high: ["H\xE1tt"],
+    extraHigh: ["Mj\xF6g h\xE1tt"],
+    fast: ["Hratt"]
+  },
   composerTextbox: ["Spjalla\xF0u vi\xF0 ChatGPT"],
   sendButton: ["Senda kva\xF0ningu"],
   searchChatsButton: ["Leita \xED spj\xF6llum"],
@@ -985,11 +1393,25 @@ var is = {
     create_image: ["B\xFAa til mynd"]
   },
   signedInMarkers: ["N\xFDtt spjall", "Leita \xED spj\xF6llum", "N\xFDlegt", "Spjallferill", "Verkefni", "Spjalla\xF0u vi\xF0 ChatGPT"],
-  responseActions: ["Afrita svar"]
+  responseActions: ["Afrita svar"],
+  stopControl: ["H\xE6tta a\xF0 svara"]
 };
 
 // src/dom/locale/ka.ts
 var ka = {
+  configurationAxes: {
+    model: ["\u10DB\u10DD\u10D3\u10D4\u10DA\u10D8"],
+    effort: ["\u10EB\u10D0\u10DA\u10D8\u10E1\u10EE\u10DB\u10D4\u10D5\u10D0"],
+    speed: ["\u10E1\u10D8\u10E9\u10E5\u10D0\u10E0\u10D4"]
+  },
+  configurationOptions: {
+    light: ["\u10DB\u10E1\u10E3\u10D1\u10E3\u10E5\u10D8"],
+    medium: ["\u10E1\u10D0\u10E8\u10E3\u10D0\u10DA\u10DD"],
+    high: ["\u10DB\u10D0\u10E6\u10D0\u10DA\u10D8"],
+    extraHigh: ["\u10EB\u10D0\u10DA\u10D8\u10D0\u10DC \u10DB\u10D0\u10E6\u10D0\u10DA\u10D8"],
+    standard: ["\u10E1\u10E2\u10D0\u10DC\u10D3\u10D0\u10E0\u10E2\u10E3\u10DA\u10D8"],
+    fast: ["\u10E1\u10EC\u10E0\u10D0\u10E4\u10D8"]
+  },
   composerTextbox: ["\u10E1\u10D0\u10E3\u10D1\u10D0\u10E0\u10D8 ChatGPT-\u10E1\u10D7\u10D0\u10DC"],
   sendButton: ["\u10DB\u10DD\u10D7\u10EE\u10DD\u10D5\u10DC\u10D8\u10E1 \u10D2\u10D0\u10D2\u10D6\u10D0\u10D5\u10DC\u10D0"],
   searchChatsButton: ["\u10E9\u10D0\u10E2\u10D4\u10D1\u10D8\u10E1 \u10EB\u10D8\u10D4\u10D1\u10D0"],
@@ -1013,11 +1435,25 @@ var ka = {
     create_image: ["\u10E8\u10D4\u10E5\u10DB\u10D4\u10DC\u10D8 \u10E1\u10E3\u10E0\u10D0\u10D7\u10D8"]
   },
   signedInMarkers: ["\u10D0\u10EE\u10D0\u10DA\u10D8 \u10E9\u10D0\u10E2\u10D8", "\u10E9\u10D0\u10E2\u10D4\u10D1\u10D8\u10E1 \u10EB\u10D8\u10D4\u10D1\u10D0", "\u10D1\u10DD\u10DA\u10DD\u10D3\u10E0\u10DD\u10D8\u10DC\u10D3\u10D4\u10DA\u10D8", "\u10E9\u10D0\u10E2\u10D8\u10E1 \u10D8\u10E1\u10E2\u10DD\u10E0\u10D8\u10D0", "\u10DE\u10E0\u10DD\u10D4\u10E5\u10E2\u10D4\u10D1\u10D8", "\u10E1\u10D0\u10E3\u10D1\u10D0\u10E0\u10D8 ChatGPT-\u10E1\u10D7\u10D0\u10DC"],
-  responseActions: ["\u10DE\u10D0\u10E1\u10E3\u10EE\u10D8\u10E1 \u10D9\u10DD\u10DE\u10D8\u10E0\u10D4\u10D1\u10D0"]
+  responseActions: ["\u10DE\u10D0\u10E1\u10E3\u10EE\u10D8\u10E1 \u10D9\u10DD\u10DE\u10D8\u10E0\u10D4\u10D1\u10D0"],
+  stopControl: ["\u10DE\u10D0\u10E1\u10E3\u10EE\u10D8\u10E1 \u10E8\u10D4\u10EC\u10E7\u10D5\u10D4\u10E2\u10D0"]
 };
 
 // src/dom/locale/kk.ts
 var kk = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B\u044C"],
+    effort: ["\u041A\u04AF\u0448-\u0436\u0456\u0433\u0435\u0440"],
+    speed: ["\u0416\u044B\u043B\u0434\u0430\u043C\u0434\u044B\u049B"]
+  },
+  configurationOptions: {
+    light: ["\u0416\u0435\u04A3\u0456\u043B"],
+    medium: ["\u041E\u0440\u0442\u0430\u0448\u0430"],
+    high: ["\u0416\u043E\u0493\u0430\u0440\u044B"],
+    extraHigh: ["\u04E8\u0442\u0435 \u0436\u043E\u0493\u0430\u0440\u044B"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u0442\u044B"],
+    fast: ["\u0416\u044B\u043B\u0434\u0430\u043C"]
+  },
   composerTextbox: ["ChatGPT-\u043C\u0435\u043D \u0447\u0430\u0442"],
   sendButton: ["\u041A\u04E9\u043C\u0435\u043A\u0441\u04E9\u0437 \u0436\u0456\u0431\u0435\u0440\u0443"],
   searchChatsButton: ["\u0427\u0430\u0442\u0442\u0430\u0440\u0434\u044B \u0456\u0437\u0434\u0435\u0443"],
@@ -1027,12 +1463,12 @@ var kk = {
   addFilesOpenerCandidates: ["\u0424\u0430\u0439\u043B\u0434\u0430\u0440\u0434\u044B \u0436\u04D9\u043D\u0435 \u0431\u0430\u0441\u049B\u0430 \u0434\u0435\u0440\u0435\u043A\u0442\u0435\u0440\u0434\u0456 \u049B\u043E\u0441\u0443"],
   addPhotosFilesMenuItem: ["\u0424\u043E\u0442\u043E\u0441\u0443\u0440\u0435\u0442\u0442\u0435\u0440 \u043C\u0435\u043D \u0444\u0430\u0439\u043B\u0434\u0430\u0440 \u049B\u043E\u0441\u0443"],
   copyResponse: ["\u0416\u0430\u0443\u0430\u043F\u0442\u044B \u043A\u04E9\u0448\u0456\u0440\u0443"],
-  modeLabels: ["\u0416\u0435\u0434\u0435\u043B", "\u041E\u0440\u0442\u0430\u0448\u0430", "\u0416\u043E\u0493\u0430\u0440\u044B", "\u0410\u0441\u0430 \u0436\u043E\u0493\u0430\u0440\u044B"],
+  modeLabels: ["\u0416\u0435\u0434\u0435\u043B", "\u041E\u0440\u0442\u0430\u0448\u0430", "\u0416\u043E\u0493\u0430\u0440\u044B", "\u0410\u0441\u0430 \u0436\u043E\u0493\u0430\u0440\u044B", "\u04E8\u0442\u0435 \u0436\u043E\u0493\u0430\u0440\u044B"],
   modeOptions: {
     instant: ["\u0416\u0435\u0434\u0435\u043B"],
     medium: ["\u041E\u0440\u0442\u0430\u0448\u0430"],
     high: ["\u0416\u043E\u0493\u0430\u0440\u044B"],
-    extraHigh: ["\u0410\u0441\u0430 \u0436\u043E\u0493\u0430\u0440\u044B"]
+    extraHigh: ["\u0410\u0441\u0430 \u0436\u043E\u0493\u0430\u0440\u044B", "\u04E8\u0442\u0435 \u0436\u043E\u0493\u0430\u0440\u044B"]
   },
   modeOpenerExtra: ["\u041A\u043E\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F\u043B\u0430\u0443..."],
   tools: {
@@ -1041,11 +1477,25 @@ var kk = {
     create_image: ["\u0421\u0443\u0440\u0435\u0442 \u0436\u0430\u0441\u0430"]
   },
   signedInMarkers: ["\u0416\u0430\u04A3\u0430 \u0447\u0430\u0442", "\u0427\u0430\u0442\u0442\u0430\u0440\u0434\u044B \u0456\u0437\u0434\u0435\u0443", "\u0421\u043E\u04A3\u0493\u044B\u043B\u0430\u0440\u044B", "\u0427\u0430\u0442 \u0442\u0430\u0440\u0438\u0445\u044B", "\u0416\u043E\u0431\u0430\u043B\u0430\u0440", "ChatGPT-\u043C\u0435\u043D \u0447\u0430\u0442"],
-  responseActions: ["\u0416\u0430\u0443\u0430\u043F\u0442\u044B \u043A\u04E9\u0448\u0456\u0440\u0443"]
+  responseActions: ["\u0416\u0430\u0443\u0430\u043F\u0442\u044B \u043A\u04E9\u0448\u0456\u0440\u0443"],
+  stopControl: ["\u0416\u0430\u0443\u0430\u043F \u0431\u0435\u0440\u0443\u0434\u0456 \u0442\u043E\u049B\u0442\u0430\u0442\u0443"]
 };
 
 // src/dom/locale/kn.ts
 var kn = {
+  configurationAxes: {
+    model: ["\u0CAE\u0CBE\u0CA1\u0CC6\u0CB2\u0CCD"],
+    effort: ["\u0C8E\u0CAB\u0CB0\u0CCD\u0C9F\u0CCD"],
+    speed: ["\u0CB5\u0CC7\u0C97"]
+  },
+  configurationOptions: {
+    light: ["\u0CB2\u0CC8\u0C9F\u0CCD"],
+    medium: ["\u0CAE\u0CC0\u0CA1\u0CBF\u0CAF\u0C82"],
+    high: ["\u0CB9\u0CC8"],
+    extraHigh: ["\u0C8E\u0C95\u0CCD\u0CB8\u0CCD\u200C\u0C9F\u0CCD\u0CB0\u0CBE \u0CB9\u0CC8"],
+    standard: ["\u0CB8\u0CCD\u0C9F\u0CCD\u0CAF\u0CBE\u0C82\u0CA1\u0CB0\u0CCD\u0CA1\u0CCD"],
+    fast: ["\u0CA4\u0CCD\u0CB5\u0CB0\u0CBF\u0CA4"]
+  },
   composerTextbox: ["ChatGPT \u0C9C\u0CCA\u0CA4\u0CC6\u0C97\u0CC6 \u0C9A\u0CBE\u0C9F\u0CCD \u0CAE\u0CBE\u0CA1\u0CBF"],
   sendButton: ["\u0CAA\u0CCD\u0CB0\u0CBE\u0C82\u0CAA\u0CCD\u0C9F\u0CCD\u0C85\u0CA8\u0CCD\u0CA8\u0CC1 \u0C95\u0CB3\u0CC1\u0CB9\u0CBF\u0CB8\u0CBF"],
   searchChatsButton: ["\u0C9A\u0CBE\u0C9F\u0CCD\u200C\u0C97\u0CB3\u0CA8\u0CCD\u0CA8\u0CC1 \u0CB9\u0CC1\u0CA1\u0CC1\u0C95\u0CBF"],
@@ -1055,12 +1505,12 @@ var kn = {
   addFilesOpenerCandidates: ["\u0CAB\u0CC8\u0CB2\u0CCD\u200C\u0C97\u0CB3\u0CC1 \u0CAE\u0CA4\u0CCD\u0CA4\u0CC1 \u0CB9\u0CC6\u0C9A\u0CCD\u0C9A\u0CBF\u0CA8\u0CB5\u0CC1\u0C97\u0CB3\u0CA8\u0CCD\u0CA8\u0CC1 \u0CB8\u0CC7\u0CB0\u0CBF\u0CB8\u0CBF"],
   addPhotosFilesMenuItem: ["\u0CAB\u0CCB\u0C9F\u0CCA \u0CAE\u0CA4\u0CCD\u0CA4\u0CC1 \u0CAB\u0CC8\u0CB2\u0CCD\u200C\u0C97\u0CB3\u0CA8\u0CCD\u0CA8\u0CC1 \u0CB8\u0CC7\u0CB0\u0CBF\u0CB8\u0CBF"],
   copyResponse: ["\u0CAA\u0CCD\u0CB0\u0CA4\u0CBF\u0C95\u0CCD\u0CB0\u0CBF\u0CAF\u0CC6\u0CAF\u0CA8\u0CCD\u0CA8\u0CC1 \u0CA8\u0C95\u0CB2\u0CBF\u0CB8\u0CBF"],
-  modeLabels: ["\u0CA4\u0C95\u0CCD\u0CB7\u0CA3", "\u0CAE\u0CA7\u0CCD\u0CAF\u0CAE", "\u0C89\u0CA8\u0CCD\u0CA8\u0CA4", "\u0C85\u0CA4\u0CBF \u0CB9\u0CC6\u0C9A\u0CCD\u0C9A\u0CC1", "\u0CAA\u0CCD\u0CB0\u0CCA"],
+  modeLabels: ["\u0CA4\u0C95\u0CCD\u0CB7\u0CA3", "\u0CAE\u0CA7\u0CCD\u0CAF\u0CAE", "\u0C89\u0CA8\u0CCD\u0CA8\u0CA4", "\u0C85\u0CA4\u0CBF \u0CB9\u0CC6\u0C9A\u0CCD\u0C9A\u0CC1", "\u0CAA\u0CCD\u0CB0\u0CCA", "\u0CAE\u0CC0\u0CA1\u0CBF\u0CAF\u0C82", "\u0CB9\u0CC8", "\u0C8E\u0C95\u0CCD\u0CB8\u0CCD\u200C\u0C9F\u0CCD\u0CB0\u0CBE \u0CB9\u0CC8"],
   modeOptions: {
     instant: ["\u0CA4\u0C95\u0CCD\u0CB7\u0CA3"],
-    medium: ["\u0CAE\u0CA7\u0CCD\u0CAF\u0CAE"],
-    high: ["\u0C89\u0CA8\u0CCD\u0CA8\u0CA4"],
-    extraHigh: ["\u0C85\u0CA4\u0CBF \u0CB9\u0CC6\u0C9A\u0CCD\u0C9A\u0CC1"],
+    medium: ["\u0CAE\u0CA7\u0CCD\u0CAF\u0CAE", "\u0CAE\u0CC0\u0CA1\u0CBF\u0CAF\u0C82"],
+    high: ["\u0C89\u0CA8\u0CCD\u0CA8\u0CA4", "\u0CB9\u0CC8"],
+    extraHigh: ["\u0C85\u0CA4\u0CBF \u0CB9\u0CC6\u0C9A\u0CCD\u0C9A\u0CC1", "\u0C8E\u0C95\u0CCD\u0CB8\u0CCD\u200C\u0C9F\u0CCD\u0CB0\u0CBE \u0CB9\u0CC8"],
     pro: ["\u0CAA\u0CCD\u0CB0\u0CCA"]
   },
   modeOpenerExtra: ["\u0C95\u0CBE\u0CA8\u0CCD\u0CAB\u0CBF\u0C97\u0CB0\u0CCD \u0CAE\u0CBE\u0CA1\u0CBF..."],
@@ -1070,11 +1520,23 @@ var kn = {
     create_image: ["\u0C87\u0CAE\u0CC7\u0C9C\u0CCD \u0CB0\u0C9A\u0CBF\u0CB8\u0CBF"]
   },
   signedInMarkers: ["\u0CB9\u0CCA\u0CB8 \u0C9A\u0CBE\u0C9F\u0CCD", "\u0C9A\u0CBE\u0C9F\u0CCD\u200C\u0C97\u0CB3\u0CA8\u0CCD\u0CA8\u0CC1 \u0CB9\u0CC1\u0CA1\u0CC1\u0C95\u0CBF", "\u0C87\u0CA4\u0CCD\u0CA4\u0CC0\u0C9A\u0CBF\u0CA8\u0CA6\u0CC1", "\u0C9A\u0CBE\u0C9F\u0CCD \u0C87\u0CA4\u0CBF\u0CB9\u0CBE\u0CB8", "\u0CAA\u0CCD\u0CB0\u0CBE\u0C9C\u0CC6\u0C95\u0CCD\u0C9F\u0CCD\u200C\u0C97\u0CB3\u0CC1", "ChatGPT \u0C9C\u0CCA\u0CA4\u0CC6\u0C97\u0CC6 \u0C9A\u0CBE\u0C9F\u0CCD \u0CAE\u0CBE\u0CA1\u0CBF"],
-  responseActions: ["\u0CAA\u0CCD\u0CB0\u0CA4\u0CBF\u0C95\u0CCD\u0CB0\u0CBF\u0CAF\u0CC6\u0CAF\u0CA8\u0CCD\u0CA8\u0CC1 \u0CA8\u0C95\u0CB2\u0CBF\u0CB8\u0CBF"]
+  responseActions: ["\u0CAA\u0CCD\u0CB0\u0CA4\u0CBF\u0C95\u0CCD\u0CB0\u0CBF\u0CAF\u0CC6\u0CAF\u0CA8\u0CCD\u0CA8\u0CC1 \u0CA8\u0C95\u0CB2\u0CBF\u0CB8\u0CBF"],
+  stopControl: ["\u0C89\u0CA4\u0CCD\u0CA4\u0CB0\u0CBF\u0CB8\u0CC1\u0CB5\u0CC1\u0CA6\u0CA8\u0CCD\u0CA8\u0CC1 \u0CA8\u0CBF\u0CB2\u0CCD\u0CB2\u0CBF\u0CB8\u0CBF"]
 };
 
 // src/dom/locale/ko.ts
 var ko = {
+  configurationAxes: {
+    model: ["\uBAA8\uB378"],
+    effort: ["\uCD94\uB860 \uC218\uC900"],
+    speed: ["\uC18D\uB3C4"]
+  },
+  configurationOptions: {
+    medium: ["\uC911\uAC04"],
+    high: ["\uB192\uC74C"],
+    extraHigh: ["\uB9E4\uC6B0 \uB192\uC74C"],
+    fast: ["\uBE60\uB984"]
+  },
   composerTextbox: ["ChatGPT\uC640 \uCC44\uD305"],
   sendButton: ["\uD504\uB86C\uD504\uD2B8 \uBCF4\uB0B4\uAE30"],
   searchChatsButton: ["\uCC44\uD305 \uAC80\uC0C9"],
@@ -1098,11 +1560,25 @@ var ko = {
     create_image: ["\uC774\uBBF8\uC9C0 \uB9CC\uB4E4\uAE30"]
   },
   signedInMarkers: ["\uC0C8 \uCC44\uD305", "\uCC44\uD305 \uAC80\uC0C9", "\uCD5C\uADFC", "\uCC44\uD305 \uAE30\uB85D", "\uD504\uB85C\uC81D\uD2B8", "ChatGPT\uC640 \uCC44\uD305"],
-  responseActions: ["\uC751\uB2F5 \uBCF5\uC0AC"]
+  responseActions: ["\uC751\uB2F5 \uBCF5\uC0AC"],
+  stopControl: ["\uB2F5\uBCC0 \uC911\uC9C0"]
 };
 
 // src/dom/locale/lt.ts
 var lt = {
+  configurationAxes: {
+    model: ["Modelis"],
+    effort: ["Pastangos"],
+    speed: ["Greitis"]
+  },
+  configurationOptions: {
+    light: ["Lengvas"],
+    medium: ["Vidutinis"],
+    high: ["Auk\u0161tas"],
+    extraHigh: ["Labai auk\u0161tas"],
+    standard: ["Standartinis"],
+    fast: ["Greitas"]
+  },
   composerTextbox: ["Pokalbis su \u201EChatGPT\u201C"],
   sendButton: ["Si\u0173sti raginim\u0105"],
   searchChatsButton: ["Ie\u0161koti pokalbiuose"],
@@ -1112,12 +1588,12 @@ var lt = {
   addFilesOpenerCandidates: ["\u012Etraukti failus ir daugiau"],
   addPhotosFilesMenuItem: ["Prid\u0117ti nuotrauk\u0173 ir fail\u0173"],
   copyResponse: ["Kopijuoti atsakym\u0105"],
-  modeLabels: ["Momentinis", "Vidutinis", "Auk\u0161tas", "Ypa\u010D didelis", "Profesionalus"],
+  modeLabels: ["Momentinis", "Vidutinis", "Auk\u0161tas", "Ypa\u010D didelis", "Profesionalus", "Labai auk\u0161tas"],
   modeOptions: {
     instant: ["Momentinis"],
     medium: ["Vidutinis"],
     high: ["Auk\u0161tas"],
-    extraHigh: ["Ypa\u010D didelis"],
+    extraHigh: ["Ypa\u010D didelis", "Labai auk\u0161tas"],
     pro: ["Profesionalus"]
   },
   modeOpenerExtra: ["Konfig\u016Bruoti..."],
@@ -1127,11 +1603,25 @@ var lt = {
     create_image: ["Sukurti vaizd\u0105"]
   },
   signedInMarkers: ["Naujas pokalbis", "Ie\u0161koti pokalbiuose", "V\u0117liausieji", "Pokalbi\u0173 istorija", "Projektai", 'Pokalbis su \u201EChatGPT"'],
-  responseActions: ["Kopijuoti atsakym\u0105"]
+  responseActions: ["Kopijuoti atsakym\u0105"],
+  stopControl: ["Stabdyti atsakym\u0105"]
 };
 
 // src/dom/locale/zh-Hans.ts
 var zhHans = {
+  configurationAxes: {
+    model: ["\u6A21\u578B"],
+    effort: ["\u63A8\u7406\u5F3A\u5EA6"],
+    speed: ["\u901F\u5EA6"]
+  },
+  configurationOptions: {
+    light: ["\u8F7B\u5EA6"],
+    medium: ["\u4E2D"],
+    high: ["\u9AD8"],
+    extraHigh: ["\u6781\u9AD8"],
+    standard: ["\u6807\u51C6"],
+    fast: ["\u5FEB\u901F"]
+  },
   composerTextbox: ["\u6709\u95EE\u9898\uFF0C\u5C3D\u7BA1\u95EE"],
   sendButton: ["\u53D1\u9001\u63D0\u793A"],
   searchChatsButton: ["\u641C\u7D22\u804A\u5929"],
@@ -1141,12 +1631,12 @@ var zhHans = {
   addFilesOpenerCandidates: ["\u6DFB\u52A0\u6587\u4EF6\u7B49"],
   addPhotosFilesMenuItem: ["\u6DFB\u52A0\u7167\u7247\u548C\u6587\u4EF6"],
   copyResponse: ["\u590D\u5236\u56DE\u590D"],
-  modeLabels: ["\u6781\u901F", "\u5747\u8861", "\u9AD8\u7EA7", "\u8D85\u9AD8", "\u4E13\u4E1A"],
+  modeLabels: ["\u6781\u901F", "\u5747\u8861", "\u9AD8\u7EA7", "\u8D85\u9AD8", "\u4E13\u4E1A", "\u4E2D", "\u9AD8", "\u6781\u9AD8"],
   modeOptions: {
     instant: ["\u6781\u901F"],
-    medium: ["\u5747\u8861"],
-    high: ["\u9AD8\u7EA7"],
-    extraHigh: ["\u8D85\u9AD8"],
+    medium: ["\u5747\u8861", "\u4E2D"],
+    high: ["\u9AD8\u7EA7", "\u9AD8"],
+    extraHigh: ["\u8D85\u9AD8", "\u6781\u9AD8"],
     pro: ["\u4E13\u4E1A"]
   },
   modeOpenerExtra: ["\u914D\u7F6E\u2026"],
@@ -1156,11 +1646,25 @@ var zhHans = {
     create_image: ["\u521B\u5EFA\u56FE\u7247"]
   },
   signedInMarkers: ["\u65B0\u804A\u5929", "\u641C\u7D22\u804A\u5929", "\u6700\u8FD1", "\u5386\u53F2\u804A\u5929\u8BB0\u5F55", "\u9879\u76EE", "\u6709\u95EE\u9898\uFF0C\u5C3D\u7BA1\u95EE"],
-  responseActions: ["\u590D\u5236\u56DE\u590D"]
+  responseActions: ["\u590D\u5236\u56DE\u590D"],
+  stopControl: ["\u505C\u6B62\u56DE\u7B54"]
 };
 
 // src/dom/locale/ur.ts
 var ur = {
+  configurationAxes: {
+    model: ["\u0645\u0627\u0688\u0644"],
+    effort: ["\u06A9\u0648\u0634\u0634"],
+    speed: ["\u0631\u0641\u062A\u0627\u0631"]
+  },
+  configurationOptions: {
+    light: ["\u0644\u0627\u0626\u0679"],
+    medium: ["\u0627\u0648\u0633\u0637"],
+    high: ["\u06C1\u0627\u0626\u06CC"],
+    extraHigh: ["\u0627\u06CC\u06A9\u0633\u0679\u0631\u0627 \u06C1\u0627\u0626\u06CC"],
+    standard: ["\u0627\u0633\u0679\u06CC\u0646\u0688\u0631\u0688"],
+    fast: ["\u062A\u06CC\u0632"]
+  },
   composerTextbox: ["\u06A9\u0648\u0626\u06CC \u0628\u06BE\u06CC \u0686\u06CC\u0632 \u067E\u0648\u0686\u06BE\u06CC\u06BA\u06D4\u06D4\u06D4"],
   sendButton: ["\u067E\u0631\u0627\u0645\u067E\u0679 \u0628\u06BE\u06CC\u062C\u06CC\u06BA"],
   searchChatsButton: ["\u0686\u06CC\u0679\u0633 \u062A\u0644\u0627\u0634 \u06A9\u0631\u06CC\u06BA"],
@@ -1170,12 +1674,12 @@ var ur = {
   addFilesOpenerCandidates: ["\u0641\u0627\u0626\u0644\u06CC\u06BA \u0648\u063A\u06CC\u0631\u06C1 \u0627\u067E \u0644\u0648\u0688 \u06A9\u0631\u06CC\u06BA"],
   addPhotosFilesMenuItem: ["\u062A\u0635\u0648\u06CC\u0631\u06CC\u06BA \u0627\u0648\u0631 \u0641\u0627\u0626\u0644\u06CC\u06BA \u0634\u0627\u0645\u0644 \u06A9\u0631\u06CC\u06BA"],
   copyResponse: ["\u062C\u0648\u0627\u0628 \u06A9\u0627\u067E\u06CC \u06A9\u0631\u06CC\u06BA"],
-  modeLabels: ["\u0641\u0648\u0631\u06CC", "\u0627\u0648\u0633\u0637", "\u0627\u0639\u0644\u06CC\u0670", "\u0627\u0646\u062A\u06C1\u0627\u0626\u06CC \u0627\u0639\u0644\u06CC\u0670"],
+  modeLabels: ["\u0641\u0648\u0631\u06CC", "\u0627\u0648\u0633\u0637", "\u0627\u0639\u0644\u06CC\u0670", "\u0627\u0646\u062A\u06C1\u0627\u0626\u06CC \u0627\u0639\u0644\u06CC\u0670", "\u06C1\u0627\u0626\u06CC", "\u0627\u06CC\u06A9\u0633\u0679\u0631\u0627 \u06C1\u0627\u0626\u06CC"],
   modeOptions: {
     instant: ["\u0641\u0648\u0631\u06CC"],
     medium: ["\u0627\u0648\u0633\u0637"],
-    high: ["\u0627\u0639\u0644\u06CC\u0670"],
-    extraHigh: ["\u0627\u0646\u062A\u06C1\u0627\u0626\u06CC \u0627\u0639\u0644\u06CC\u0670"]
+    high: ["\u0627\u0639\u0644\u06CC\u0670", "\u06C1\u0627\u0626\u06CC"],
+    extraHigh: ["\u0627\u0646\u062A\u06C1\u0627\u0626\u06CC \u0627\u0639\u0644\u06CC\u0670", "\u0627\u06CC\u06A9\u0633\u0679\u0631\u0627 \u06C1\u0627\u0626\u06CC"]
   },
   modeOpenerExtra: ["\u06A9\u0646\u0641\u06CC\u06AF\u0631 \u06A9\u0631\u06CC\u06BA..."],
   tools: {
@@ -1184,11 +1688,25 @@ var ur = {
     create_image: ["\u062A\u0635\u0648\u06CC\u0631 \u0628\u0646\u0627\u0626\u06CC\u06BA"]
   },
   signedInMarkers: ["\u0646\u0626\u06CC \u0686\u06CC\u0679", "\u0686\u06CC\u0679\u0633 \u062A\u0644\u0627\u0634 \u06A9\u0631\u06CC\u06BA", "\u062D\u0627\u0644\u06CC\u06C1", "\u0686\u06CC\u0679 \u06C1\u0633\u0679\u0631\u06CC", "\u067E\u0631\u0627\u062C\u06CC\u06A9\u0679\u0633", "\u06A9\u0648\u0626\u06CC \u0628\u06BE\u06CC \u0686\u06CC\u0632 \u067E\u0648\u0686\u06BE\u06CC\u06BA\u06D4\u06D4\u06D4"],
-  responseActions: ["\u062C\u0648\u0627\u0628 \u06A9\u0627\u067E\u06CC \u06A9\u0631\u06CC\u06BA"]
+  responseActions: ["\u062C\u0648\u0627\u0628 \u06A9\u0627\u067E\u06CC \u06A9\u0631\u06CC\u06BA"],
+  stopControl: ["\u062C\u0648\u0627\u0628 \u0631\u0648\u06A9\u06CC\u06BA"]
 };
 
 // src/dom/locale/uk.ts
 var uk = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B\u044C"],
+    effort: ["\u0417\u0443\u0441\u0438\u043B\u043B\u044F"],
+    speed: ["\u0428\u0432\u0438\u0434\u043A\u0456\u0441\u0442\u044C"]
+  },
+  configurationOptions: {
+    light: ["\u041D\u0438\u0437\u044C\u043A\u0438\u0439"],
+    medium: ["\u0421\u0435\u0440\u0435\u0434\u043D\u0456\u0439"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u0438\u0439"],
+    extraHigh: ["\u041D\u0430\u0439\u0432\u0438\u0449\u0438\u0439"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u0438\u0439"],
+    fast: ["\u0428\u0432\u0438\u0434\u043A\u0430"]
+  },
   composerTextbox: ["\u0417\u0430\u043F\u0438\u0442\u0430\u0439\u0442\u0435 \u0431\u0443\u0434\u044C-\u0449\u043E"],
   sendButton: ["\u041D\u0430\u0434\u0456\u0441\u043B\u0430\u0442\u0438 \u0437\u0430\u043F\u0438\u0442"],
   searchChatsButton: ["\u041F\u043E\u0448\u0443\u043A \u0447\u0430\u0442\u0456\u0432"],
@@ -1198,12 +1716,12 @@ var uk = {
   addFilesOpenerCandidates: ["\u0414\u043E\u0434\u0430\u0432\u0430\u0439\u0442\u0435 \u0444\u0430\u0439\u043B\u0438 \u0439 \u0432\u0438\u043A\u043E\u043D\u0443\u0439\u0442\u0435 \u0456\u043D\u0448\u0456 \u0434\u0456\u0457"],
   addPhotosFilesMenuItem: ["\u0414\u043E\u0434\u0430\u0442\u0438 \u0441\u0432\u0456\u0442\u043B\u0438\u043D\u0438 \u0442\u0430 \u0444\u0430\u0439\u043B\u0438"],
   copyResponse: ["\u041A\u043E\u043F\u0456\u044E\u0432\u0430\u0442\u0438 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C"],
-  modeLabels: ["\u041C\u0438\u0442\u0442\u0454\u0432\u0438\u0439", "\u0421\u0435\u0440\u0435\u0434\u043D\u0456\u0439", "\u0412\u0438\u0441\u043E\u043A\u0438\u0439", "\u0414\u0443\u0436\u0435 \u0432\u0438\u0441\u043E\u043A\u0438\u0439"],
+  modeLabels: ["\u041C\u0438\u0442\u0442\u0454\u0432\u0438\u0439", "\u0421\u0435\u0440\u0435\u0434\u043D\u0456\u0439", "\u0412\u0438\u0441\u043E\u043A\u0438\u0439", "\u0414\u0443\u0436\u0435 \u0432\u0438\u0441\u043E\u043A\u0438\u0439", "\u041D\u0430\u0439\u0432\u0438\u0449\u0438\u0439"],
   modeOptions: {
     instant: ["\u041C\u0438\u0442\u0442\u0454\u0432\u0438\u0439"],
     medium: ["\u0421\u0435\u0440\u0435\u0434\u043D\u0456\u0439"],
     high: ["\u0412\u0438\u0441\u043E\u043A\u0438\u0439"],
-    extraHigh: ["\u0414\u0443\u0436\u0435 \u0432\u0438\u0441\u043E\u043A\u0438\u0439"]
+    extraHigh: ["\u0414\u0443\u0436\u0435 \u0432\u0438\u0441\u043E\u043A\u0438\u0439", "\u041D\u0430\u0439\u0432\u0438\u0449\u0438\u0439"]
   },
   modeOpenerExtra: ["\u041D\u0430\u043B\u0430\u0448\u0442\u0443\u0432\u0430\u0442\u0438\u2026"],
   tools: {
@@ -1212,11 +1730,25 @@ var uk = {
     create_image: ["\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u043D\u044F"]
   },
   signedInMarkers: ["\u041D\u043E\u0432\u0438\u0439 \u0447\u0430\u0442", "\u041F\u043E\u0448\u0443\u043A \u0447\u0430\u0442\u0456\u0432", "\u041D\u0435\u0449\u043E\u0434\u0430\u0432\u043D\u0456", "\u0406\u0441\u0442\u043E\u0440\u0456\u044F \u0447\u0430\u0442\u0456\u0432", "\u041F\u0440\u043E\u0454\u043A\u0442\u0438", "\u0417\u0430\u043F\u0438\u0442\u0430\u0439\u0442\u0435 \u0431\u0443\u0434\u044C-\u0449\u043E"],
-  responseActions: ["\u041A\u043E\u043F\u0456\u044E\u0432\u0430\u0442\u0438 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C"]
+  responseActions: ["\u041A\u043E\u043F\u0456\u044E\u0432\u0430\u0442\u0438 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C"],
+  stopControl: ["\u0417\u0443\u043F\u0438\u043D\u0438\u0442\u0438 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C"]
 };
 
 // src/dom/locale/pt-BR.ts
 var ptBR = {
+  configurationAxes: {
+    model: ["Modelo"],
+    effort: ["Esfor\xE7o"],
+    speed: ["Velocidade"]
+  },
+  configurationOptions: {
+    light: ["Leve"],
+    medium: ["M\xE9dio"],
+    high: ["Alto"],
+    extraHigh: ["Extra alto"],
+    standard: ["Padr\xE3o"],
+    fast: ["R\xE1pido"]
+  },
   composerTextbox: ["Pergunte alguma coisa"],
   sendButton: ["Enviar prompt"],
   searchChatsButton: ["Buscar chats"],
@@ -1226,12 +1758,12 @@ var ptBR = {
   addFilesOpenerCandidates: ["Adicionar arquivos e mais"],
   addPhotosFilesMenuItem: ["Carregar fotos e arquivos"],
   copyResponse: ["Copiar resposta"],
-  modeLabels: ["Instant\xE2neo", "M\xE9dio", "Alto", "Muito alta"],
+  modeLabels: ["Instant\xE2neo", "M\xE9dio", "Alto", "Muito alta", "Extra alto"],
   modeOptions: {
     instant: ["Instant\xE2neo"],
     medium: ["M\xE9dio"],
     high: ["Alto"],
-    extraHigh: ["Muito alta"]
+    extraHigh: ["Muito alta", "Extra alto"]
   },
   modeOpenerExtra: ["Configurar\u2026"],
   tools: {
@@ -1240,11 +1772,25 @@ var ptBR = {
     create_image: ["Criar imagem"]
   },
   signedInMarkers: ["Novo chat", "Buscar chats", "Recentes", "Hist\xF3rico de chats", "Projetos", "Pergunte alguma coisa"],
-  responseActions: ["Copiar resposta"]
+  responseActions: ["Copiar resposta"],
+  stopControl: ["Parar de responder"]
 };
 
 // src/dom/locale/pt-PT.ts
 var ptPT = {
+  configurationAxes: {
+    model: ["Modelo"],
+    effort: ["Esfor\xE7o"],
+    speed: ["Velocidade"]
+  },
+  configurationOptions: {
+    light: ["Leve"],
+    medium: ["M\xE9dio"],
+    high: ["Elevado"],
+    extraHigh: ["Muito elevado"],
+    standard: ["Padr\xE3o"],
+    fast: ["R\xE1pido"]
+  },
   composerTextbox: ["Pergunte qualquer coisa"],
   sendButton: ["Enviar prompt"],
   searchChatsButton: ["Pesquisar chats"],
@@ -1254,12 +1800,12 @@ var ptPT = {
   addFilesOpenerCandidates: ["Adicionar ficheiros e mais"],
   addPhotosFilesMenuItem: ["Carregar fotos e ficheiros"],
   copyResponse: ["Copiar resposta"],
-  modeLabels: ["Instant\xE2neo", "M\xE9dia", "Alta", "M\xE1ximo"],
+  modeLabels: ["Instant\xE2neo", "M\xE9dia", "Alta", "M\xE1ximo", "M\xE9dio", "Elevado", "Muito elevado"],
   modeOptions: {
     instant: ["Instant\xE2neo"],
-    medium: ["M\xE9dia"],
-    high: ["Alta"],
-    extraHigh: ["M\xE1ximo"]
+    medium: ["M\xE9dia", "M\xE9dio"],
+    high: ["Alta", "Elevado"],
+    extraHigh: ["M\xE1ximo", "Muito elevado"]
   },
   modeOpenerExtra: ["Configurar..."],
   tools: {
@@ -1268,11 +1814,24 @@ var ptPT = {
     create_image: ["Criar imagem"]
   },
   signedInMarkers: ["Novo chat", "Pesquisar chats", "Recentes", "Hist\xF3rico de chat", "Projetos", "Pergunte qualquer coisa"],
-  responseActions: ["Copiar resposta"]
+  responseActions: ["Copiar resposta"],
+  stopControl: ["Parar resposta"]
 };
 
 // src/dom/locale/pl.ts
 var pl = {
+  configurationAxes: {
+    effort: ["Nak\u0142ad pracy"],
+    speed: ["Szybko\u015B\u0107"]
+  },
+  configurationOptions: {
+    light: ["Lekki"],
+    medium: ["\u015Aredni"],
+    high: ["Wysoki"],
+    extraHigh: ["Bardzo wysoki"],
+    standard: ["Standardowy"],
+    fast: ["Szybki"]
+  },
   composerTextbox: ["Zapytaj o cokolwiek"],
   sendButton: ["Wy\u015Blij polecenie"],
   searchChatsButton: ["Szukaj czat\xF3w"],
@@ -1282,11 +1841,11 @@ var pl = {
   addFilesOpenerCandidates: ["Dodawaj pliki i nie tylko"],
   addPhotosFilesMenuItem: ["Prze\u015Blij zdj\u0119cia i pliki"],
   copyResponse: ["Kopiuj odpowied\u017A"],
-  modeLabels: ["B\u0142yskawiczny", "\u015Aredni", "Zaawansowana", "Bardzo wysoki"],
+  modeLabels: ["B\u0142yskawiczny", "\u015Aredni", "Zaawansowana", "Bardzo wysoki", "Wysoki"],
   modeOptions: {
     instant: ["B\u0142yskawiczny"],
     medium: ["\u015Aredni"],
-    high: ["Zaawansowana"],
+    high: ["Zaawansowana", "Wysoki"],
     extraHigh: ["Bardzo wysoki"]
   },
   modeOpenerExtra: ["Skonfiguruj..."],
@@ -1296,11 +1855,24 @@ var pl = {
     create_image: ["Stw\xF3rz obraz"]
   },
   signedInMarkers: ["Nowy czat", "Szukaj czat\xF3w", "Ostatnie", "Historia czatu", "Projekty", "Zapytaj o cokolwiek"],
-  responseActions: ["Kopiuj odpowied\u017A"]
+  responseActions: ["Kopiuj odpowied\u017A"],
+  stopControl: ["Przerwij odpowied\u017A"]
 };
 
 // src/dom/locale/sk.ts
 var sk = {
+  configurationAxes: {
+    effort: ["\xDAsilie"],
+    speed: ["R\xFDchlos\u0165"]
+  },
+  configurationOptions: {
+    light: ["\u013Dahk\xE9"],
+    medium: ["Stredn\xE1"],
+    high: ["Vysok\xE1"],
+    extraHigh: ["Ve\u013Emi vysok\xE1"],
+    standard: ["\u0160tandardn\xE1"],
+    fast: ["R\xFDchla"]
+  },
   composerTextbox: ["Sp\xFDtaj sa hoci\u010Do\u2026"],
   sendButton: ["Odosla\u0165 pr\xEDkaz"],
   searchChatsButton: ["H\u013Eada\u0165 v \u010Detoch"],
@@ -1310,12 +1882,12 @@ var sk = {
   addFilesOpenerCandidates: ["Prida\u0165 s\xFAbory a in\xE9"],
   addPhotosFilesMenuItem: ["Nahra\u0165 fotografie a s\xFAbory"],
   copyResponse: ["Kop\xEDrova\u0165 odpove\u010F"],
-  modeLabels: ["Okam\u017Eit\xE1", "Stredn\xE1", "Vysok\xE1", "Extra vysok\xE1"],
+  modeLabels: ["Okam\u017Eit\xE1", "Stredn\xE1", "Vysok\xE1", "Extra vysok\xE1", "Ve\u013Emi vysok\xE1"],
   modeOptions: {
     instant: ["Okam\u017Eit\xE1"],
     medium: ["Stredn\xE1"],
     high: ["Vysok\xE1"],
-    extraHigh: ["Extra vysok\xE1"]
+    extraHigh: ["Extra vysok\xE1", "Ve\u013Emi vysok\xE1"]
   },
   modeOpenerExtra: ["Konfigurova\u0165..."],
   tools: {
@@ -1324,11 +1896,23 @@ var sk = {
     create_image: ["Vytvor obr\xE1zok"]
   },
   signedInMarkers: ["Nov\xFD \u010Det", "H\u013Eada\u0165 v \u010Detoch", "Ned\xE1vne", "Hist\xF3ria \u010Detov", "Projekty", "Sp\xFDtaj sa hoci\u010Do\u2026"],
-  responseActions: ["Kop\xEDrova\u0165 odpove\u010F"]
+  responseActions: ["Kop\xEDrova\u0165 odpove\u010F"],
+  stopControl: ["Zastavi\u0165 odpove\u010F"]
 };
 
 // src/dom/locale/ro.ts
 var ro = {
+  configurationAxes: {
+    effort: ["Efort"],
+    speed: ["Vitez\u0103"]
+  },
+  configurationOptions: {
+    light: ["U\u0219or"],
+    medium: ["Medie"],
+    high: ["Ridicat\u0103"],
+    extraHigh: ["Foarte ridicat\u0103"],
+    fast: ["Rapid"]
+  },
   composerTextbox: ["\xCEntreab\u0103 orice"],
   sendButton: ["Trimite solicitarea"],
   searchChatsButton: ["Caut\u0103 discu\u021Bii"],
@@ -1338,10 +1922,10 @@ var ro = {
   addFilesOpenerCandidates: ["Adaug\u0103 fi\u0219iere \u0219i multe altele"],
   addPhotosFilesMenuItem: ["\xCEncarc\u0103 fotografii \u0219i fi\u0219iere"],
   copyResponse: ["Copiaz\u0103 r\u0103spunsul"],
-  modeLabels: ["Mediu", "Ridicat", "Foarte ridicat\u0103"],
+  modeLabels: ["Mediu", "Ridicat", "Foarte ridicat\u0103", "Medie", "Ridicat\u0103"],
   modeOptions: {
-    medium: ["Mediu"],
-    high: ["Ridicat"],
+    medium: ["Mediu", "Medie"],
+    high: ["Ridicat", "Ridicat\u0103"],
     extraHigh: ["Foarte ridicat\u0103"]
   },
   modeOpenerExtra: ["Configureaz\u0103..."],
@@ -1351,11 +1935,24 @@ var ro = {
     create_image: ["Creeaz\u0103 o imagine"]
   },
   signedInMarkers: ["Discu\u021Bie nou\u0103", "Caut\u0103 discu\u021Bii", "Recente", "Istoricul discu\u021Biilor", "Proiecte", "\xCEntreab\u0103 orice"],
-  responseActions: ["Copiaz\u0103 r\u0103spunsul"]
+  responseActions: ["Copiaz\u0103 r\u0103spunsul"],
+  stopControl: ["Opre\u0219te r\u0103spunsul"]
 };
 
 // src/dom/locale/nb.ts
 var nb = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["Innsats"],
+    speed: ["Hastighet"]
+  },
+  configurationOptions: {
+    light: ["Lett"],
+    medium: ["Middels"],
+    high: ["H\xF8y"],
+    extraHigh: ["Ekstra h\xF8y"],
+    fast: ["Rask"]
+  },
   composerTextbox: ["Sp\xF8r om hva som helst"],
   sendButton: ["Send melding"],
   searchChatsButton: ["S\xF8k i samtaler"],
@@ -1379,11 +1976,25 @@ var nb = {
     create_image: ["Lag et bilde"]
   },
   signedInMarkers: ["Ny chat", "S\xF8k i samtaler", "Nylige", "Chattehistorikk", "Prosjekter", "Sp\xF8r om hva som helst"],
-  responseActions: ["Kopier svar"]
+  responseActions: ["Kopier svar"],
+  stopControl: ["Avbryt svar"]
 };
 
 // src/dom/locale/ml.ts
 var ml = {
+  configurationAxes: {
+    model: ["\u0D2E\u0D4B\u0D21\u0D7D"],
+    effort: ["\u0D36\u0D4D\u0D30\u0D2E\u0D02"],
+    speed: ["\u0D35\u0D47\u0D17\u0D24"]
+  },
+  configurationOptions: {
+    light: ["\u0D32\u0D33\u0D3F\u0D24\u0D02"],
+    medium: ["\u0D07\u0D1F\u0D24\u0D4D\u0D24\u0D30\u0D02"],
+    high: ["\u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D"],
+    extraHigh: ["\u0D05\u0D24\u0D4D\u0D2F\u0D27\u0D3F\u0D15\u0D02 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D"],
+    standard: ["\u0D05\u0D1F\u0D3F\u0D38\u0D4D\u0D25\u0D3E\u0D28\u0D02"],
+    fast: ["\u0D35\u0D47\u0D17\u0D02"]
+  },
   composerTextbox: ["\u0D0E\u0D28\u0D4D\u0D24\u0D41\u0D02 \u0D1A\u0D4B\u0D26\u0D3F\u0D15\u0D4D\u0D15\u0D41\u0D15"],
   sendButton: ["\u0D2A\u0D4D\u0D30\u0D4B\u0D02\u0D2A\u0D4D\u0D31\u0D4D\u0D31\u0D4D \u0D05\u0D2F\u0D2F\u0D4D\u0D15\u0D4D\u0D15\u0D41\u0D15"],
   searchChatsButton: ["\u0D1A\u0D3E\u0D31\u0D4D\u0D31\u0D41\u0D15\u0D7E \u0D24\u0D3F\u0D30\u0D2F\u0D41\u0D15"],
@@ -1393,12 +2004,12 @@ var ml = {
   addFilesOpenerCandidates: ["\u0D2B\u0D2F\u0D32\u0D41\u0D15\u0D33\u0D41\u0D02 \u0D2E\u0D31\u0D4D\u0D31\u0D41\u0D02 \u0D1A\u0D47\u0D7C\u0D15\u0D4D\u0D15\u0D41\u0D15"],
   addPhotosFilesMenuItem: ["\u0D2B\u0D4B\u0D1F\u0D4D\u0D1F\u0D4B\u0D15\u0D33\u0D41\u0D02 \u0D2B\u0D2F\u0D32\u0D41\u0D15\u0D33\u0D41\u0D02 \u0D05\u0D2A\u0D4D\u200C\u0D32\u0D4B\u0D21\u0D4D \u0D1A\u0D46\u0D2F\u0D4D\u0D2F\u0D41\u0D15"],
   copyResponse: ["\u0D2E\u0D31\u0D41\u0D2A\u0D1F\u0D3F \u0D15\u0D4B\u0D2A\u0D4D\u0D2A\u0D3F \u0D1A\u0D46\u0D2F\u0D4D\u0D2F\u0D41\u0D15"],
-  modeLabels: ["\u0D24\u0D7D\u0D15\u0D4D\u0D37\u0D23\u0D02", "\u0D07\u0D1F\u0D24\u0D4D\u0D24\u0D30\u0D02", "\u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D", "\u0D35\u0D33\u0D30\u0D46 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28", "\u0D2A\u0D4D\u0D30\u0D4B"],
+  modeLabels: ["\u0D24\u0D7D\u0D15\u0D4D\u0D37\u0D23\u0D02", "\u0D07\u0D1F\u0D24\u0D4D\u0D24\u0D30\u0D02", "\u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D", "\u0D35\u0D33\u0D30\u0D46 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28", "\u0D2A\u0D4D\u0D30\u0D4B", "\u0D05\u0D24\u0D4D\u0D2F\u0D27\u0D3F\u0D15\u0D02 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D"],
   modeOptions: {
     instant: ["\u0D24\u0D7D\u0D15\u0D4D\u0D37\u0D23\u0D02"],
     medium: ["\u0D07\u0D1F\u0D24\u0D4D\u0D24\u0D30\u0D02"],
     high: ["\u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D"],
-    extraHigh: ["\u0D35\u0D33\u0D30\u0D46 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28"],
+    extraHigh: ["\u0D35\u0D33\u0D30\u0D46 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28", "\u0D05\u0D24\u0D4D\u0D2F\u0D27\u0D3F\u0D15\u0D02 \u0D09\u0D2F\u0D7C\u0D28\u0D4D\u0D28\u0D24\u0D4D"],
     pro: ["\u0D2A\u0D4D\u0D30\u0D4B"]
   },
   modeOpenerExtra: ["\u0D15\u0D4B\u0D7A\u0D2B\u0D3F\u0D17\u0D7C \u0D1A\u0D46\u0D2F\u0D4D\u0D2F\u0D41\u0D15\u2026"],
@@ -1408,11 +2019,25 @@ var ml = {
     create_image: ["\u0D1A\u0D3F\u0D24\u0D4D\u0D30\u0D02 \u0D38\u0D43\u0D37\u0D4D\u0D1F\u0D3F\u0D15\u0D4D\u0D15\u0D41\u0D15"]
   },
   signedInMarkers: ["\u0D2A\u0D41\u0D24\u0D3F\u0D2F \u0D1A\u0D3E\u0D31\u0D4D\u0D31\u0D4D", "\u0D1A\u0D3E\u0D31\u0D4D\u0D31\u0D41\u0D15\u0D7E \u0D24\u0D3F\u0D30\u0D2F\u0D41\u0D15", "\u0D38\u0D2E\u0D40\u0D2A\u0D15\u0D3E\u0D32\u0D24\u0D4D\u0D24\u0D41\u0D33\u0D4D\u0D33", "\u0D1A\u0D3E\u0D31\u0D4D\u0D31\u0D4D \u0D1A\u0D30\u0D3F\u0D24\u0D4D\u0D30\u0D02", "\u0D2A\u0D4D\u0D30\u0D4B\u0D1C\u0D15\u0D4D\u0D31\u0D4D\u0D31\u0D41\u0D15\u0D7E", "\u0D0E\u0D28\u0D4D\u0D24\u0D41\u0D02 \u0D1A\u0D4B\u0D26\u0D3F\u0D15\u0D4D\u0D15\u0D41\u0D15"],
-  responseActions: ["\u0D2E\u0D31\u0D41\u0D2A\u0D1F\u0D3F \u0D15\u0D4B\u0D2A\u0D4D\u0D2A\u0D3F \u0D1A\u0D46\u0D2F\u0D4D\u0D2F\u0D41\u0D15"]
+  responseActions: ["\u0D2E\u0D31\u0D41\u0D2A\u0D1F\u0D3F \u0D15\u0D4B\u0D2A\u0D4D\u0D2A\u0D3F \u0D1A\u0D46\u0D2F\u0D4D\u0D2F\u0D41\u0D15"],
+  stopControl: ["\u0D2E\u0D31\u0D41\u0D2A\u0D1F\u0D3F \u0D28\u0D3F\u0D7C\u0D24\u0D4D\u0D24\u0D41\u0D15"]
 };
 
 // src/dom/locale/ru.ts
 var ru = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B\u044C"],
+    effort: ["\u0423\u0440\u043E\u0432\u0435\u043D\u044C"],
+    speed: ["\u0421\u043A\u043E\u0440\u043E\u0441\u0442\u044C"]
+  },
+  configurationOptions: {
+    light: ["\u041D\u0438\u0437\u043A\u0438\u0439"],
+    medium: ["\u0421\u0440\u0435\u0434\u043D\u0438\u0439"],
+    high: ["\u0412\u044B\u0441\u043E\u043A\u0438\u0439"],
+    extraHigh: ["\u041E\u0447\u0435\u043D\u044C \u0432\u044B\u0441\u043E\u043A\u0438\u0439"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u044B\u0439"],
+    fast: ["\u0411\u044B\u0441\u0442\u0440\u043E"]
+  },
   composerTextbox: ["\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u0435 ChatGPT"],
   sendButton: ["\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443"],
   searchChatsButton: ["\u0418\u0441\u043A\u0430\u0442\u044C \u0447\u0430\u0442\u044B"],
@@ -1422,8 +2047,10 @@ var ru = {
   addFilesOpenerCandidates: ["\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0439\u0442\u0435 \u0444\u0430\u0439\u043B\u044B \u0438 \u043C\u043D\u043E\u0433\u043E\u0435 \u0434\u0440\u0443\u0433\u043E\u0435"],
   addPhotosFilesMenuItem: ["\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0444\u043E\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0438 \u0444\u0430\u0439\u043B\u044B"],
   copyResponse: ["\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0442\u0432\u0435\u0442"],
-  modeLabels: ["\u041E\u0447\u0435\u043D\u044C \u0432\u044B\u0441\u043E\u043A\u0438\u0439"],
+  modeLabels: ["\u041E\u0447\u0435\u043D\u044C \u0432\u044B\u0441\u043E\u043A\u0438\u0439", "\u0421\u0440\u0435\u0434\u043D\u0438\u0439", "\u0412\u044B\u0441\u043E\u043A\u0438\u0439"],
   modeOptions: {
+    medium: ["\u0421\u0440\u0435\u0434\u043D\u0438\u0439"],
+    high: ["\u0412\u044B\u0441\u043E\u043A\u0438\u0439"],
     extraHigh: ["\u041E\u0447\u0435\u043D\u044C \u0432\u044B\u0441\u043E\u043A\u0438\u0439"]
   },
   modeOpenerExtra: ["\u041A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F..."],
@@ -1433,11 +2060,25 @@ var ru = {
     create_image: ["\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435"]
   },
   signedInMarkers: ["\u041D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442", "\u0418\u0441\u043A\u0430\u0442\u044C \u0447\u0430\u0442\u044B", "\u041D\u0435\u0434\u0430\u0432\u043D\u0435\u0435", "\u0418\u0441\u0442\u043E\u0440\u0438\u044F \u0447\u0430\u0442\u0430", "\u041F\u0440\u043E\u0435\u043A\u0442\u044B", "\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u0435 ChatGPT"],
-  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0442\u0432\u0435\u0442"]
+  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0442\u0432\u0435\u0442"],
+  stopControl: ["\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442"]
 };
 
 // src/dom/locale/pa.ts
 var pa = {
+  configurationAxes: {
+    model: ["\u0A2E\u0A3E\u0A21\u0A32"],
+    effort: ["\u0A15\u0A4B\u0A38\u0A3C\u0A3F\u0A38\u0A3C"],
+    speed: ["\u0A17\u0A24\u0A40"]
+  },
+  configurationOptions: {
+    light: ["\u0A39\u0A32\u0A15\u0A3E"],
+    medium: ["\u0A2E\u0A40\u0A21\u0A40\u0A05\u0A2E"],
+    high: ["\u0A39\u0A3E\u0A08"],
+    extraHigh: ["\u0A10\u0A15\u0A38\u0A1F\u0A4D\u0A30\u0A3E \u0A39\u0A3E\u0A08"],
+    standard: ["\u0A2E\u0A3F\u0A06\u0A30\u0A40"],
+    fast: ["\u0A24\u0A47\u0A1C\u0A3C"]
+  },
   composerTextbox: ["\u0A15\u0A41\u0A1D \u0A35\u0A40 \u0A2A\u0A41\u0A71\u0A1B\u0A4B"],
   sendButton: ["\u0A2A\u0A4D\u0A30\u0A4B\u0A02\u0A2A\u0A1F \u0A2D\u0A47\u0A1C\u0A4B"],
   searchChatsButton: ["\u0A1A\u0A48\u0A1F\u0A3E\u0A02 \u0A16\u0A4B\u0A1C\u0A4B"],
@@ -1447,12 +2088,12 @@ var pa = {
   addFilesOpenerCandidates: ["\u0A2B\u0A3E\u0A08\u0A32\u0A3E\u0A02 \u0A05\u0A24\u0A47 \u0A39\u0A4B\u0A30 \u0A2C\u0A39\u0A41\u0A24 \u0A15\u0A41\u0A1D \u0A38\u0A3C\u0A3E\u0A2E\u0A32 \u0A15\u0A30\u0A4B"],
   addPhotosFilesMenuItem: ["\u0A2B\u0A3C\u0A4B\u0A1F\u0A4B\u0A06\u0A02 \u0A05\u0A24\u0A47 \u0A2B\u0A3C\u0A3E\u0A08\u0A32\u0A3E\u0A02 \u0A05\u0A71\u0A2A\u0A32\u0A4B\u0A21 \u0A15\u0A30\u0A4B"],
   copyResponse: ["\u0A1C\u0A35\u0A3E\u0A2C \u0A15\u0A3E\u0A2A\u0A40 \u0A15\u0A30\u0A4B"],
-  modeLabels: ["\u0A24\u0A41\u0A30\u0A70\u0A24", "\u0A2E\u0A71\u0A27\u0A2E", "\u0A09\u0A71\u0A1A", "\u0A05\u0A24\u0A3F \u0A09\u0A71\u0A1A", "\u0A2A\u0A4D\u0A30\u0A4B"],
+  modeLabels: ["\u0A24\u0A41\u0A30\u0A70\u0A24", "\u0A2E\u0A71\u0A27\u0A2E", "\u0A09\u0A71\u0A1A", "\u0A05\u0A24\u0A3F \u0A09\u0A71\u0A1A", "\u0A2A\u0A4D\u0A30\u0A4B", "\u0A2E\u0A40\u0A21\u0A40\u0A05\u0A2E", "\u0A39\u0A3E\u0A08", "\u0A10\u0A15\u0A38\u0A1F\u0A4D\u0A30\u0A3E \u0A39\u0A3E\u0A08"],
   modeOptions: {
     instant: ["\u0A24\u0A41\u0A30\u0A70\u0A24"],
-    medium: ["\u0A2E\u0A71\u0A27\u0A2E"],
-    high: ["\u0A09\u0A71\u0A1A"],
-    extraHigh: ["\u0A05\u0A24\u0A3F \u0A09\u0A71\u0A1A"],
+    medium: ["\u0A2E\u0A71\u0A27\u0A2E", "\u0A2E\u0A40\u0A21\u0A40\u0A05\u0A2E"],
+    high: ["\u0A09\u0A71\u0A1A", "\u0A39\u0A3E\u0A08"],
+    extraHigh: ["\u0A05\u0A24\u0A3F \u0A09\u0A71\u0A1A", "\u0A10\u0A15\u0A38\u0A1F\u0A4D\u0A30\u0A3E \u0A39\u0A3E\u0A08"],
     pro: ["\u0A2A\u0A4D\u0A30\u0A4B"]
   },
   modeOpenerExtra: ["\u0A15\u0A4C\u0A28\u0A2B\u0A3F\u0A17\u0A30..."],
@@ -1462,11 +2103,25 @@ var pa = {
     create_image: ["\u0A24\u0A38\u0A35\u0A40\u0A30 \u0A2C\u0A23\u0A3E\u0A09"]
   },
   signedInMarkers: ["\u0A28\u0A35\u0A40\u0A02 \u0A1A\u0A48\u0A1F", "\u0A1A\u0A48\u0A1F\u0A3E\u0A02 \u0A16\u0A4B\u0A1C\u0A4B", "\u0A39\u0A3E\u0A32\u0A40\u0A06", "\u0A1A\u0A48\u0A1F \u0A39\u0A3F\u0A38\u0A1F\u0A30\u0A40", "\u0A2A\u0A4D\u0A30\u0A4B\u0A1C\u0A48\u0A15\u0A1F", "\u0A15\u0A41\u0A1D \u0A35\u0A40 \u0A2A\u0A41\u0A71\u0A1B\u0A4B"],
-  responseActions: ["\u0A1C\u0A35\u0A3E\u0A2C \u0A15\u0A3E\u0A2A\u0A40 \u0A15\u0A30\u0A4B"]
+  responseActions: ["\u0A1C\u0A35\u0A3E\u0A2C \u0A15\u0A3E\u0A2A\u0A40 \u0A15\u0A30\u0A4B"],
+  stopControl: ["\u0A1C\u0A35\u0A3E\u0A2C \u0A26\u0A47\u0A23\u0A3E \u0A2C\u0A70\u0A26 \u0A15\u0A30\u0A4B"]
 };
 
 // src/dom/locale/mr.ts
 var mr = {
+  configurationAxes: {
+    model: ["\u092E\u0949\u0921\u0947\u0932"],
+    effort: ["\u092A\u094D\u0930\u092F\u0924\u094D\u0928"],
+    speed: ["\u0935\u0947\u0917"]
+  },
+  configurationOptions: {
+    light: ["\u0939\u0932\u0915\u093E"],
+    medium: ["\u092E\u0927\u094D\u092F\u092E"],
+    high: ["\u0909\u091A\u094D\u091A"],
+    extraHigh: ["\u0905\u0924\u094D\u092F\u0941\u091A\u094D\u091A"],
+    standard: ["\u0938\u094D\u091F\u0901\u0921\u0930\u094D\u0921"],
+    fast: ["\u091C\u0932\u0926"]
+  },
   composerTextbox: ["\u0915\u093E\u0939\u0940\u0939\u0940 \u0935\u093F\u091A\u093E\u0930\u093E"],
   sendButton: ["\u092A\u094D\u0930\u0949\u092E\u094D\u092A\u094D\u091F \u092A\u093E\u0920\u0935\u093E"],
   searchChatsButton: ["\u091A\u0945\u091F\u094D\u0938 \u0936\u094B\u0927\u093E"],
@@ -1476,12 +2131,12 @@ var mr = {
   addFilesOpenerCandidates: ["\u092B\u093E\u0907\u0932\u094D\u0938 \u091C\u094B\u0921\u093E \u0906\u0923\u093F \u0907\u0924\u0930 \u0905\u0928\u0947\u0915 \u0917\u094B\u0937\u094D\u091F\u0940 \u0915\u0930\u093E"],
   addPhotosFilesMenuItem: ["\u092B\u094B\u091F\u094B \u0906\u0923\u093F \u092B\u093E\u0907\u0932\u094D\u0938 \u0905\u092A\u0932\u094B\u0921 \u0915\u0930\u093E"],
   copyResponse: ["\u092A\u094D\u0930\u0924\u093F\u0938\u093E\u0926 \u0915\u0949\u092A\u0940 \u0915\u0930\u093E"],
-  modeLabels: ["\u091D\u091F\u092A\u091F", "\u092E\u0927\u094D\u092F\u092E", "\u0909\u091A\u094D\u091A", "\u0905\u0924\u093F\u0909\u091A\u094D\u091A", "\u092A\u094D\u0930\u094B"],
+  modeLabels: ["\u091D\u091F\u092A\u091F", "\u092E\u0927\u094D\u092F\u092E", "\u0909\u091A\u094D\u091A", "\u0905\u0924\u093F\u0909\u091A\u094D\u091A", "\u092A\u094D\u0930\u094B", "\u0905\u0924\u094D\u092F\u0941\u091A\u094D\u091A"],
   modeOptions: {
     instant: ["\u091D\u091F\u092A\u091F"],
     medium: ["\u092E\u0927\u094D\u092F\u092E"],
     high: ["\u0909\u091A\u094D\u091A"],
-    extraHigh: ["\u0905\u0924\u093F\u0909\u091A\u094D\u091A"],
+    extraHigh: ["\u0905\u0924\u093F\u0909\u091A\u094D\u091A", "\u0905\u0924\u094D\u092F\u0941\u091A\u094D\u091A"],
     pro: ["\u092A\u094D\u0930\u094B"]
   },
   modeOpenerExtra: ["\u0915\u0949\u0928\u094D\u092B\u093F\u0917\u0930 \u0915\u0930\u093E..."],
@@ -1491,11 +2146,24 @@ var mr = {
     create_image: ["\u092A\u094D\u0930\u0924\u093F\u092E\u093E \u0924\u092F\u093E\u0930 \u0915\u0930\u093E"]
   },
   signedInMarkers: ["\u0928\u0935\u0940\u0928 \u091A\u0945\u091F", "\u091A\u0945\u091F\u094D\u0938 \u0936\u094B\u0927\u093E", "\u0905\u0932\u0940\u0915\u0921\u0940\u0932", "\u091A\u0945\u091F \u0907\u0924\u093F\u0939\u093E\u0938", "\u092A\u094D\u0930\u094B\u091C\u0947\u0915\u094D\u091F\u094D\u0938", "\u0915\u093E\u0939\u0940\u0939\u0940 \u0935\u093F\u091A\u093E\u0930\u093E"],
-  responseActions: ["\u092A\u094D\u0930\u0924\u093F\u0938\u093E\u0926 \u0915\u0949\u092A\u0940 \u0915\u0930\u093E"]
+  responseActions: ["\u092A\u094D\u0930\u0924\u093F\u0938\u093E\u0926 \u0915\u0949\u092A\u0940 \u0915\u0930\u093E"],
+  stopControl: ["\u0909\u0924\u094D\u0924\u0930 \u0925\u093E\u0902\u092C\u0935\u093E"]
 };
 
 // src/dom/locale/tr.ts
 var tr = {
+  configurationAxes: {
+    effort: ["D\xFCzey"],
+    speed: ["H\u0131z"]
+  },
+  configurationOptions: {
+    light: ["S\u0131n\u0131rl\u0131"],
+    medium: ["Orta"],
+    high: ["Y\xFCksek"],
+    extraHigh: ["\xC7ok Y\xFCksek"],
+    standard: ["Standart"],
+    fast: ["H\u0131zl\u0131"]
+  },
   composerTextbox: ["Herhangi bir \u015Fey sor"],
   sendButton: ["Prompt g\xF6nder"],
   searchChatsButton: ["Sohbetlerde ara"],
@@ -1505,9 +2173,9 @@ var tr = {
   addFilesOpenerCandidates: ["Dosyalar\u0131 ve \xE7ok daha fazlas\u0131n\u0131 ekle"],
   addPhotosFilesMenuItem: ["Foto\u011Fraf ve dosya y\xFCkle"],
   copyResponse: ["Yan\u0131t\u0131 kopyala"],
-  modeLabels: ["An\u0131nda", "Orta", "Y\xFCksek", "\xC7ok Y\xFCksek"],
+  modeLabels: ["An\u0131nda", "Orta", "Y\xFCksek", "\xC7ok Y\xFCksek", "H\u0131zl\u0131"],
   modeOptions: {
-    instant: ["An\u0131nda"],
+    instant: ["An\u0131nda", "H\u0131zl\u0131"],
     medium: ["Orta"],
     high: ["Y\xFCksek"],
     extraHigh: ["\xC7ok Y\xFCksek"]
@@ -1519,11 +2187,25 @@ var tr = {
     create_image: ["G\xF6rsel olu\u015Ftur"]
   },
   signedInMarkers: ["Yeni sohbet", "Sohbetlerde ara", "Yak\u0131n zamandakiler", "Sohbet ge\xE7mi\u015Fi", "Projeler", "Herhangi bir \u015Fey sor"],
-  responseActions: ["Yan\u0131t\u0131 kopyala"]
+  responseActions: ["Yan\u0131t\u0131 kopyala"],
+  stopControl: ["Yan\u0131tlamay\u0131 durdur"]
 };
 
 // src/dom/locale/sw.ts
 var sw = {
+  configurationAxes: {
+    model: ["Modeli"],
+    effort: ["Juhudi"],
+    speed: ["Kasi"]
+  },
+  configurationOptions: {
+    light: ["Nyepesi"],
+    medium: ["Wastani"],
+    high: ["Juu"],
+    extraHigh: ["Juu Zaidi"],
+    standard: ["Kawaida"],
+    fast: ["Haraka"]
+  },
   composerTextbox: ["Uliza chochote"],
   sendButton: ["Tuma makumbusho"],
   searchChatsButton: ["Tafuta mazungumzo"],
@@ -1547,11 +2229,25 @@ var sw = {
     create_image: ["Unda picha"]
   },
   signedInMarkers: ["Chati mpya", "Tafuta mazungumzo", "Hivi karibuni", "Historia ya chati", "Miradi", "Uliza chochote"],
-  responseActions: ["Nakili jibu"]
+  responseActions: ["Nakili jibu"],
+  stopControl: ["Sitisha kujibu"]
 };
 
 // src/dom/locale/te.ts
 var te = {
+  configurationAxes: {
+    model: ["\u0C2E\u0C4B\u0C21\u0C32\u0C4D"],
+    effort: ["\u0C2A\u0C4D\u0C30\u0C2F\u0C24\u0C4D\u0C28\u0C02"],
+    speed: ["\u0C35\u0C47\u0C17\u0C02"]
+  },
+  configurationOptions: {
+    light: ["\u0C32\u0C48\u0C1F\u0C4D"],
+    medium: ["\u0C2E\u0C40\u0C21\u0C3F\u0C2F\u0C02"],
+    high: ["\u0C39\u0C48"],
+    extraHigh: ["\u0C0E\u0C15\u0C4D\u0C38\u0C4D\u200C\u0C1F\u0C4D\u0C30\u0C3E \u0C39\u0C48"],
+    standard: ["\u0C38\u0C4D\u0C1F\u0C3E\u0C02\u0C21\u0C30\u0C4D\u0C21\u0C4D"],
+    fast: ["\u0C35\u0C47\u0C17\u0C35\u0C02\u0C24\u0C02"]
+  },
   composerTextbox: ["\u0C0F\u0C26\u0C48\u0C28\u0C3E \u0C05\u0C21\u0C17\u0C02\u0C21\u0C3F"],
   sendButton: ["\u0C2A\u0C4D\u0C30\u0C3E\u0C02\u0C2A\u0C4D\u0C1F\u0C4D\u200C\u0C28\u0C41 \u0C2A\u0C02\u0C2A\u0C3F\u0C02\u0C1A\u0C02\u0C21\u0C3F"],
   searchChatsButton: ["\u0C1A\u0C3E\u0C1F\u0C4D\u200C\u0C32\u0C28\u0C41 \u0C36\u0C4B\u0C27\u0C3F\u0C02\u0C1A\u0C02\u0C21\u0C3F"],
@@ -1561,12 +2257,12 @@ var te = {
   addFilesOpenerCandidates: ["\u0C2B\u0C48\u0C32\u0C4D\u200C\u0C32\u0C28\u0C41 \u0C2E\u0C30\u0C3F\u0C2F\u0C41 \u0C2E\u0C30\u0C3F\u0C28\u0C4D\u0C28\u0C3F \u0C1C\u0C4B\u0C21\u0C3F\u0C02\u0C1A\u0C02\u0C21\u0C3F"],
   addPhotosFilesMenuItem: ["\u0C2B\u0C4B\u0C1F\u0C4B\u0C32\u0C41 & \u0C2B\u0C48\u0C32\u0C4D\u200C\u0C32\u0C28\u0C41 \u0C05\u0C2A\u0C4D\u200C\u0C32\u0C4B\u0C21\u0C4D \u0C1A\u0C47\u0C2F\u0C02\u0C21\u0C3F"],
   copyResponse: ["\u0C2A\u0C4D\u0C30\u0C24\u0C3F\u0C38\u0C4D\u0C2A\u0C02\u0C26\u0C28\u0C28\u0C41 \u0C15\u0C3E\u0C2A\u0C40 \u0C1A\u0C47\u0C2F\u0C02\u0C21\u0C3F"],
-  modeLabels: ["\u0C24\u0C15\u0C4D\u0C37\u0C23\u0C02", "\u0C2E\u0C27\u0C4D\u0C2F\u0C38\u0C4D\u0C25", "\u0C05\u0C27\u0C3F\u0C15", "\u0C05\u0C24\u0C4D\u0C2F\u0C27\u0C3F\u0C15", "\u0C2A\u0C4D\u0C30\u0C4B"],
+  modeLabels: ["\u0C24\u0C15\u0C4D\u0C37\u0C23\u0C02", "\u0C2E\u0C27\u0C4D\u0C2F\u0C38\u0C4D\u0C25", "\u0C05\u0C27\u0C3F\u0C15", "\u0C05\u0C24\u0C4D\u0C2F\u0C27\u0C3F\u0C15", "\u0C2A\u0C4D\u0C30\u0C4B", "\u0C2E\u0C40\u0C21\u0C3F\u0C2F\u0C02", "\u0C39\u0C48", "\u0C0E\u0C15\u0C4D\u0C38\u0C4D\u200C\u0C1F\u0C4D\u0C30\u0C3E \u0C39\u0C48"],
   modeOptions: {
     instant: ["\u0C24\u0C15\u0C4D\u0C37\u0C23\u0C02"],
-    medium: ["\u0C2E\u0C27\u0C4D\u0C2F\u0C38\u0C4D\u0C25"],
-    high: ["\u0C05\u0C27\u0C3F\u0C15"],
-    extraHigh: ["\u0C05\u0C24\u0C4D\u0C2F\u0C27\u0C3F\u0C15"],
+    medium: ["\u0C2E\u0C27\u0C4D\u0C2F\u0C38\u0C4D\u0C25", "\u0C2E\u0C40\u0C21\u0C3F\u0C2F\u0C02"],
+    high: ["\u0C05\u0C27\u0C3F\u0C15", "\u0C39\u0C48"],
+    extraHigh: ["\u0C05\u0C24\u0C4D\u0C2F\u0C27\u0C3F\u0C15", "\u0C0E\u0C15\u0C4D\u0C38\u0C4D\u200C\u0C1F\u0C4D\u0C30\u0C3E \u0C39\u0C48"],
     pro: ["\u0C2A\u0C4D\u0C30\u0C4B"]
   },
   modeOpenerExtra: ["\u0C15\u0C3E\u0C28\u0C4D\u0C2B\u0C3F\u0C17\u0C30\u0C4D \u0C1A\u0C47\u0C2F\u0C02\u0C21\u0C3F"],
@@ -1576,11 +2272,19 @@ var te = {
     create_image: ["\u0C1A\u0C3F\u0C24\u0C4D\u0C30\u0C3E\u0C28\u0C4D\u0C28\u0C3F \u0C38\u0C43\u0C37\u0C4D\u0C1F\u0C3F\u0C02\u0C1A\u0C41"]
   },
   signedInMarkers: ["\u0C15\u0C4A\u0C24\u0C4D\u0C24 \u0C1A\u0C3E\u0C1F\u0C4D", "\u0C1A\u0C3E\u0C1F\u0C4D\u200C\u0C32\u0C28\u0C41 \u0C36\u0C4B\u0C27\u0C3F\u0C02\u0C1A\u0C02\u0C21\u0C3F", "\u0C07\u0C1F\u0C40\u0C35\u0C32\u0C3F\u0C35\u0C3F", "\u0C1A\u0C3E\u0C1F\u0C4D \u0C1A\u0C30\u0C3F\u0C24\u0C4D\u0C30", "\u0C2A\u0C4D\u0C30\u0C3E\u0C1C\u0C46\u0C15\u0C4D\u0C1F\u0C4D\u200C\u0C32\u0C41", "\u0C0F\u0C26\u0C48\u0C28\u0C3E \u0C05\u0C21\u0C17\u0C02\u0C21\u0C3F"],
-  responseActions: ["\u0C2A\u0C4D\u0C30\u0C24\u0C3F\u0C38\u0C4D\u0C2A\u0C02\u0C26\u0C28\u0C28\u0C41 \u0C15\u0C3E\u0C2A\u0C40 \u0C1A\u0C47\u0C2F\u0C02\u0C21\u0C3F"]
+  responseActions: ["\u0C2A\u0C4D\u0C30\u0C24\u0C3F\u0C38\u0C4D\u0C2A\u0C02\u0C26\u0C28\u0C28\u0C41 \u0C15\u0C3E\u0C2A\u0C40 \u0C1A\u0C47\u0C2F\u0C02\u0C21\u0C3F"],
+  stopControl: ["\u0C38\u0C2E\u0C3E\u0C27\u0C3E\u0C28\u0C02 \u0C07\u0C35\u0C4D\u0C35\u0C21\u0C02 \u0C06\u0C2A\u0C41"]
 };
 
 // src/dom/locale/tl.ts
 var tl = {
+  configurationAxes: {
+    effort: ["Pagsisikap"],
+    speed: ["Bilis"]
+  },
+  configurationOptions: {
+    fast: ["Mabilis"]
+  },
   composerTextbox: ["Mag-chat sa ChatGPT"],
   sendButton: ["Magpadala ng prompt"],
   searchChatsButton: ["Maghanap sa mga chat"],
@@ -1596,11 +2300,17 @@ var tl = {
     create_image: ["Gumawa ng larawan"]
   },
   signedInMarkers: ["Bagong chat", "Maghanap sa mga chat", "Mga kamakailan", "History ng chat", "Mga proyekto", "Mag-chat sa ChatGPT"],
-  responseActions: ["Kopyahin ang sagot"]
+  responseActions: ["Kopyahin ang sagot"],
+  stopControl: ["Itigil ang pagsagot"]
 };
 
 // src/dom/locale/th.ts
 var th = {
+  configurationAxes: {
+    model: ["\u0E42\u0E21\u0E40\u0E14\u0E25"],
+    effort: ["\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E04\u0E34\u0E14"],
+    speed: ["\u0E04\u0E27\u0E32\u0E21\u0E40\u0E23\u0E47\u0E27"]
+  },
   composerTextbox: ["\u0E16\u0E32\u0E21\u0E2D\u0E30\u0E44\u0E23\u0E01\u0E47\u0E44\u0E14\u0E49"],
   sendButton: ["\u0E2A\u0E48\u0E07\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07"],
   searchChatsButton: ["\u0E04\u0E49\u0E19\u0E2B\u0E32\u0E41\u0E0A\u0E15"],
@@ -1624,11 +2334,25 @@ var th = {
     create_image: ["\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E"]
   },
   signedInMarkers: ["\u0E41\u0E0A\u0E15\u0E43\u0E2B\u0E21\u0E48", "\u0E04\u0E49\u0E19\u0E2B\u0E32\u0E41\u0E0A\u0E15", "\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E40\u0E23\u0E47\u0E27\u0E46 \u0E19\u0E35\u0E49", "\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E41\u0E0A\u0E15", "\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23", "\u0E16\u0E32\u0E21\u0E2D\u0E30\u0E44\u0E23\u0E01\u0E47\u0E44\u0E14\u0E49"],
-  responseActions: ["\u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01\u0E04\u0E33\u0E15\u0E2D\u0E1A"]
+  responseActions: ["\u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01\u0E04\u0E33\u0E15\u0E2D\u0E1A"],
+  stopControl: ["\u0E2B\u0E22\u0E38\u0E14\u0E15\u0E2D\u0E1A"]
 };
 
 // src/dom/locale/bn.ts
 var bn = {
+  configurationAxes: {
+    model: ["\u09AE\u09A1\u09C7\u09B2"],
+    effort: ["\u09AA\u09CD\u09B0\u099A\u09C7\u09B7\u09CD\u099F\u09BE"],
+    speed: ["\u0997\u09A4\u09BF"]
+  },
+  configurationOptions: {
+    light: ["\u09B2\u09BE\u0987\u099F"],
+    medium: ["\u09AE\u09BE\u099D\u09BE\u09B0\u09BF"],
+    high: ["\u0989\u099A\u09CD\u099A"],
+    extraHigh: ["\u0985\u09A4\u09BF \u0989\u099A\u09CD\u099A"],
+    standard: ["\u09B8\u09CD\u099F\u09CD\u09AF\u09BE\u09A8\u09CD\u09A1\u09BE\u09B0\u09CD\u09A1"],
+    fast: ["\u09A6\u09CD\u09B0\u09C1\u09A4"]
+  },
   composerTextbox: ["\u09AF\u09C7 \u0995\u09CB\u09A8 \u0995\u09BF\u099B\u09C1 \u099C\u09BF\u099C\u09CD\u099E\u09C7\u09B8 \u0995\u09B0\u09C1\u09A8\u2026"],
   sendButton: ["\u09AA\u09CD\u09B0\u09AE\u09CD\u09AA\u099F \u09AA\u09BE\u09A0\u09BE\u09A8"],
   searchChatsButton: ["\u099A\u09CD\u09AF\u09BE\u099F \u0996\u09C1\u0981\u099C\u09C1\u09A8"],
@@ -1653,11 +2377,23 @@ var bn = {
     create_image: ["\u099B\u09AC\u09BF \u09A4\u09C8\u09B0\u09BF \u0995\u09B0\u09C1\u09A8"]
   },
   signedInMarkers: ["\u09A8\u09A4\u09C1\u09A8 \u099A\u09CD\u09AF\u09BE\u099F", "\u099A\u09CD\u09AF\u09BE\u099F \u0996\u09C1\u0981\u099C\u09C1\u09A8", "\u09B8\u09BE\u09AE\u09CD\u09AA\u09CD\u09B0\u09A4\u09BF\u0995", "\u099A\u09CD\u09AF\u09BE\u099F\u09C7\u09B0 \u0987\u09A4\u09BF\u09B9\u09BE\u09B8", "\u09AA\u09CD\u09B0\u09CB\u099C\u09C7\u0995\u09CD\u099F", "\u09AF\u09C7 \u0995\u09CB\u09A8 \u0995\u09BF\u099B\u09C1 \u099C\u09BF\u099C\u09CD\u099E\u09C7\u09B8 \u0995\u09B0\u09C1\u09A8\u2026"],
-  responseActions: ["\u0989\u09A4\u09CD\u09A4\u09B0 \u0995\u09AA\u09BF \u0995\u09B0\u09C1\u09A8"]
+  responseActions: ["\u0989\u09A4\u09CD\u09A4\u09B0 \u0995\u09AA\u09BF \u0995\u09B0\u09C1\u09A8"],
+  stopControl: ["\u0989\u09A4\u09CD\u09A4\u09B0 \u09A5\u09BE\u09AE\u09BE\u09A8"]
 };
 
 // src/dom/locale/ms.ts
 var ms = {
+  configurationAxes: {
+    effort: ["Usaha"],
+    speed: ["Kelajuan"]
+  },
+  configurationOptions: {
+    light: ["Ringan"],
+    medium: ["Sederhana"],
+    high: ["Tinggi"],
+    extraHigh: ["Sangat Tinggi"],
+    fast: ["Pantas"]
+  },
   composerTextbox: ["Tanya apa-apa sahaja..."],
   sendButton: ["Hantar gesaan"],
   searchChatsButton: ["Cari sembang"],
@@ -1681,11 +2417,25 @@ var ms = {
     create_image: ["Cipta imej"]
   },
   signedInMarkers: ["Sembang baharu", "Cari sembang", "Terbaharu", "Sejarah sembang", "Projek", "Tanya apa-apa sahaja..."],
-  responseActions: ["Salin tindak balas"]
+  responseActions: ["Salin tindak balas"],
+  stopControl: ["Hentikan jawapan"]
 };
 
 // src/dom/locale/so.ts
 var so = {
+  configurationAxes: {
+    model: ["Moodel"],
+    effort: ["Dadaal"],
+    speed: ["Xawaare"]
+  },
+  configurationOptions: {
+    light: ["Fudud"],
+    medium: ["Dhexdhexaad"],
+    high: ["Sare"],
+    extraHigh: ["Aad U Sarreeya"],
+    standard: ["Caadi"],
+    fast: ["Degdeg"]
+  },
   composerTextbox: ["Waydii waxkasta"],
   sendButton: ["Dir qoraal"],
   searchChatsButton: ["Raadi wada-sheekaysiyada"],
@@ -1695,12 +2445,12 @@ var so = {
   addFilesOpenerCandidates: ["Ku dar faylashada iyo wax badan"],
   addPhotosFilesMenuItem: ["Soo geli sawirada & faylasha"],
   copyResponse: ["Koobiyee jawaabta"],
-  modeLabels: ["Degdeg", "Dhexdhexaad", "Sare", "Aad u sarreeya"],
+  modeLabels: ["Degdeg", "Dhexdhexaad", "Sare", "Aad u sarreeya", "Aad U Sarreeya"],
   modeOptions: {
     instant: ["Degdeg"],
     medium: ["Dhexdhexaad"],
     high: ["Sare"],
-    extraHigh: ["Aad u sarreeya"]
+    extraHigh: ["Aad u sarreeya", "Aad U Sarreeya"]
   },
   modeOpenerExtra: ["Ku xidh..."],
   tools: {
@@ -1709,11 +2459,24 @@ var so = {
     create_image: ["Abuur sawir"]
   },
   signedInMarkers: ["Wada Sheekeysi cusub", "Raadi wada-sheekaysiyada", "Waxyaabihii dhawaa", "Taariikhda sheekeysiga", "Mashruucyada", "Waydii waxkasta"],
-  responseActions: ["Koobiyee jawaabta"]
+  responseActions: ["Koobiyee jawaabta"],
+  stopControl: ["Jooji jawaabista"]
 };
 
 // src/dom/locale/nl.ts
 var nl = {
+  configurationAxes: {
+    effort: ["Inspanning"],
+    speed: ["Snelheid"]
+  },
+  configurationOptions: {
+    light: ["Licht"],
+    medium: ["Gemiddeld"],
+    high: ["Hoog"],
+    extraHigh: ["Zeer Hoog"],
+    standard: ["Standaard"],
+    fast: ["Snel"]
+  },
   composerTextbox: ["Stel een vraag"],
   sendButton: ["Prompt versturen"],
   searchChatsButton: ["Chats doorzoeken"],
@@ -1723,12 +2486,12 @@ var nl = {
   addFilesOpenerCandidates: ["Bestanden en meer toevoegen"],
   addPhotosFilesMenuItem: ["Foto's en bestanden uploaden"],
   copyResponse: ["Reactie kopi\xEBren"],
-  modeLabels: ["Direct", "Gemiddeld", "Hoog", "Extra hoog"],
+  modeLabels: ["Direct", "Gemiddeld", "Hoog", "Extra hoog", "Zeer Hoog"],
   modeOptions: {
     instant: ["Direct"],
     medium: ["Gemiddeld"],
     high: ["Hoog"],
-    extraHigh: ["Extra hoog"]
+    extraHigh: ["Extra hoog", "Zeer Hoog"]
   },
   modeOpenerExtra: ["Configureren..."],
   tools: {
@@ -1737,11 +2500,24 @@ var nl = {
     create_image: ["Maak een afbeelding"]
   },
   signedInMarkers: ["Nieuwe chat", "Chats doorzoeken", "Recente items", "Chatgeschiedenis", "Projecten", "Stel een vraag"],
-  responseActions: ["Reactie kopi\xEBren"]
+  responseActions: ["Reactie kopi\xEBren"],
+  stopControl: ["Prompt versturen"]
 };
 
 // src/dom/locale/sv.ts
 var sv = {
+  configurationAxes: {
+    model: ["Modell"],
+    effort: ["Resonemangsniv\xE5"],
+    speed: ["Hastighet"]
+  },
+  configurationOptions: {
+    light: ["L\xE5g"],
+    medium: ["Balanserad"],
+    high: ["H\xF6g"],
+    extraHigh: ["Extra h\xF6g"],
+    fast: ["Snabb"]
+  },
   composerTextbox: ["Fr\xE5ga vad som helst"],
   sendButton: ["Skicka prompt"],
   searchChatsButton: ["S\xF6k i chattar"],
@@ -1765,11 +2541,25 @@ var sv = {
     create_image: ["Skapa en bild"]
   },
   signedInMarkers: ["Ny chatt", "S\xF6k i chattar", "Senaste", "Chatthistorik", "Projekt", "Fr\xE5ga vad som helst"],
-  responseActions: ["Kopiera svar"]
+  responseActions: ["Kopiera svar"],
+  stopControl: ["Sluta svara"]
 };
 
 // src/dom/locale/lv.ts
 var lv = {
+  configurationAxes: {
+    model: ["Modelis"],
+    effort: ["P\u016Bles"],
+    speed: ["\u0100trums"]
+  },
+  configurationOptions: {
+    light: ["Viegls"],
+    medium: ["Vid\u0113js"],
+    high: ["Augsts"],
+    extraHigh: ["\u013Boti augsts"],
+    standard: ["Standarta"],
+    fast: ["\u0100trs"]
+  },
   composerTextbox: ["Jaut\u0101 jebko"],
   sendButton: ["S\u016Bt\u012Bt uzvedni"],
   searchChatsButton: ["Mekl\u0113t t\u0113rz\u0113\u0161anas"],
@@ -1793,11 +2583,25 @@ var lv = {
     create_image: ["Izveido att\u0113lu"]
   },
   signedInMarkers: ["Jauna t\u0113rz\u0113tava", "Mekl\u0113t t\u0113rz\u0113\u0161anas", "Nesen\u0101s sarunas", "T\u0113rz\u0113\u0161anas v\u0113sture", "Projekti", "Jaut\u0101 jebko"],
-  responseActions: ["Kop\u0113t atbildi"]
+  responseActions: ["Kop\u0113t atbildi"],
+  stopControl: ["P\u0101rtraukt atbildi"]
 };
 
 // src/dom/locale/mk.ts
 var mk = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B"],
+    effort: ["\u041D\u0430\u043F\u043E\u0440"],
+    speed: ["\u0411\u0440\u0437\u0438\u043D\u0430"]
+  },
+  configurationOptions: {
+    light: ["\u041B\u0435\u0441\u043D\u043E"],
+    medium: ["\u0421\u0440\u0435\u0434\u043D\u0430"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u0430"],
+    extraHigh: ["\u0415\u043A\u0441\u0442\u0440\u0430 \u0432\u0438\u0441\u043E\u043A\u0430"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0434\u0435\u043D"],
+    fast: ["\u0411\u0440\u0437\u043E"]
+  },
   composerTextbox: ["\u041F\u0440\u0430\u0448\u0430\u0458 \u0448\u0442\u043E \u0431\u0438\u043B\u043E"],
   sendButton: ["\u0418\u0441\u043F\u0440\u0430\u0442\u0438 \u043F\u0440\u043E\u043C\u043F\u0442"],
   searchChatsButton: ["\u041F\u0440\u0435\u0431\u0430\u0440\u0430\u0458 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440\u0438"],
@@ -1807,11 +2611,11 @@ var mk = {
   addFilesOpenerCandidates: ["\u0414\u043E\u0434\u0430\u0458 \u0434\u0430\u0442\u043E\u0442\u0435\u043A\u0438 \u0438 \u043F\u043E\u0432\u0435\u045C\u0435"],
   addPhotosFilesMenuItem: ["\u041F\u043E\u0441\u0442\u0430\u0432\u0438 \u0444\u043E\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0438 \u0434\u0430\u0442\u043E\u0442\u0435\u043A\u0438"],
   copyResponse: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"],
-  modeLabels: ["\u0421\u0440\u0435\u0434\u043D\u043E", "\u0412\u0438\u0441\u043E\u043A\u043E", "\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u043E"],
+  modeLabels: ["\u0421\u0440\u0435\u0434\u043D\u043E", "\u0412\u0438\u0441\u043E\u043A\u043E", "\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u043E", "\u0421\u0440\u0435\u0434\u043D\u0430", "\u0412\u0438\u0441\u043E\u043A\u0430", "\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u0430"],
   modeOptions: {
-    medium: ["\u0421\u0440\u0435\u0434\u043D\u043E"],
-    high: ["\u0412\u0438\u0441\u043E\u043A\u043E"],
-    extraHigh: ["\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u043E"]
+    medium: ["\u0421\u0440\u0435\u0434\u043D\u043E", "\u0421\u0440\u0435\u0434\u043D\u0430"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u043E", "\u0412\u0438\u0441\u043E\u043A\u0430"],
+    extraHigh: ["\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u043E", "\u041C\u043D\u043E\u0433\u0443 \u0432\u0438\u0441\u043E\u043A\u0430"]
   },
   modeOpenerExtra: ["\u041A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0438\u0440\u0430\u0458..."],
   tools: {
@@ -1820,11 +2624,23 @@ var mk = {
     create_image: ["\u041A\u0440\u0435\u0438\u0440\u0430\u0458 \u0441\u043B\u0438\u043A\u0430"]
   },
   signedInMarkers: ["\u041D\u043E\u0432 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440", "\u041F\u0440\u0435\u0431\u0430\u0440\u0430\u0458 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440\u0438", "\u041D\u0435\u043E\u0434\u0430\u043C\u043D\u0435\u0448\u043D\u0438", "\u0418\u0441\u0442\u043E\u0440\u0438\u0458\u0430 \u043D\u0430 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440\u0438", "\u041F\u0440\u043E\u0435\u043A\u0442\u0438", "\u041F\u0440\u0430\u0448\u0430\u0458 \u0448\u0442\u043E \u0431\u0438\u043B\u043E"],
-  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"]
+  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"],
+  stopControl: ["\u0421\u043E\u043F\u0440\u0438 \u043E\u0434\u0433\u043E\u0432\u0430\u0440\u0430\u045A\u0435"]
 };
 
 // src/dom/locale/sq.ts
 var sq = {
+  configurationAxes: {
+    effort: ["P\xEBrpjekje"],
+    speed: ["Shpejt\xEBsi"]
+  },
+  configurationOptions: {
+    light: ["I leht\xEB"],
+    medium: ["Mesatare"],
+    high: ["E lart\xEB"],
+    extraHigh: ["Tep\xEBr e lart\xEB"],
+    fast: ["I shpejt\xEB"]
+  },
   composerTextbox: ["Pyet p\xEBr \xE7do gj\xEB"],
   sendButton: ["D\xEBrgo k\xEBrkes\xEBn"],
   searchChatsButton: ["K\xEBrko bisedat"],
@@ -1834,12 +2650,12 @@ var sq = {
   addFilesOpenerCandidates: ["Shto skedar\xEB e m\xEB shum\xEB"],
   addPhotosFilesMenuItem: ["Ngarko foto dhe skedar\xEB"],
   copyResponse: ["Kopjo p\xEBrgjigjen"],
-  modeLabels: ["I menj\xEBhersh\xEBm", "Mesatar", "Lart\xEB", "Shum\xEB i lart\xEB"],
+  modeLabels: ["I menj\xEBhersh\xEBm", "Mesatar", "Lart\xEB", "Shum\xEB i lart\xEB", "Mesatare", "E lart\xEB", "Tep\xEBr e lart\xEB"],
   modeOptions: {
     instant: ["I menj\xEBhersh\xEBm"],
-    medium: ["Mesatar"],
-    high: ["Lart\xEB"],
-    extraHigh: ["Shum\xEB i lart\xEB"]
+    medium: ["Mesatar", "Mesatare"],
+    high: ["Lart\xEB", "E lart\xEB"],
+    extraHigh: ["Shum\xEB i lart\xEB", "Tep\xEBr e lart\xEB"]
   },
   modeOpenerExtra: ["Konfiguro..."],
   tools: {
@@ -1848,11 +2664,24 @@ var sq = {
     create_image: ["Krijo nj\xEB imazh"]
   },
   signedInMarkers: ["Bised\xEB e re", "K\xEBrko bisedat", "M\xEB t\xEB fundit", "Historia e bised\xEBs", "Projektet", "Pyet p\xEBr \xE7do gj\xEB"],
-  responseActions: ["Kopjo p\xEBrgjigjen"]
+  responseActions: ["Kopjo p\xEBrgjigjen"],
+  stopControl: ["Ndalo p\xEBrgjigjen"]
 };
 
 // src/dom/locale/sl.ts
 var sl = {
+  configurationAxes: {
+    effort: ["Napor"],
+    speed: ["Hitrost"]
+  },
+  configurationOptions: {
+    light: ["Osnovno"],
+    medium: ["Srednje"],
+    high: ["Visoko"],
+    extraHigh: ["Zelo visoko"],
+    standard: ["Standardno"],
+    fast: ["Hitro"]
+  },
   composerTextbox: ["Vpra\u0161ajte kar koli"],
   sendButton: ["Po\u0161lji poziv"],
   searchChatsButton: ["I\u0161\u010Di po klepetih"],
@@ -1862,11 +2691,11 @@ var sl = {
   addFilesOpenerCandidates: ["Dodaj datoteke in \u0161e ve\u010D"],
   addPhotosFilesMenuItem: ["Nalo\u017Ei fotografije in datoteke"],
   copyResponse: ["Kopiraj odgovor"],
-  modeLabels: ["Takoj", "Srednja", "Visoka", "Zelo visoko"],
+  modeLabels: ["Takoj", "Srednja", "Visoka", "Zelo visoko", "Srednje", "Visoko"],
   modeOptions: {
     instant: ["Takoj"],
-    medium: ["Srednja"],
-    high: ["Visoka"],
+    medium: ["Srednja", "Srednje"],
+    high: ["Visoka", "Visoko"],
     extraHigh: ["Zelo visoko"]
   },
   modeOpenerExtra: ["Konfiguracija \u2026"],
@@ -1876,11 +2705,25 @@ var sl = {
     create_image: ["Ustvari sliko"]
   },
   signedInMarkers: ["Nov klepet", "I\u0161\u010Di po klepetih", "Nedavno", "Zgodovina klepetov", "Projekti", "Vpra\u0161ajte kar koli"],
-  responseActions: ["Kopiraj odgovor"]
+  responseActions: ["Kopiraj odgovor"],
+  stopControl: ["Ustavi odgovarjanje"]
 };
 
 // src/dom/locale/sr.ts
 var sr = {
+  configurationAxes: {
+    model: ["\u041C\u043E\u0434\u0435\u043B"],
+    effort: ["\u041D\u0438\u0432\u043E"],
+    speed: ["\u0411\u0440\u0437\u0438\u043D\u0430"]
+  },
+  configurationOptions: {
+    light: ["\u041B\u0430\u0433\u0430\u043D\u043E"],
+    medium: ["\u0421\u0440\u0435\u0434\u045A\u0435"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u043E"],
+    extraHigh: ["\u0412\u0435\u043E\u043C\u0430 \u0432\u0438\u0441\u043E\u043A\u043E"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0434\u043D\u043E"],
+    fast: ["\u0411\u0440\u0437\u043E"]
+  },
   composerTextbox: ["\u041F\u0438\u0442\u0430\u0458 \u0431\u0438\u043B\u043E \u0448\u0442\u0430"],
   sendButton: ["\u041F\u043E\u0448\u0430\u0459\u0438 \u043F\u0440\u043E\u043C\u043F\u0442"],
   searchChatsButton: ["\u041F\u0440\u0435\u0442\u0440\u0430\u0436\u0438 \u045B\u0430\u0441\u043A\u0430\u045A\u0430"],
@@ -1890,8 +2733,10 @@ var sr = {
   addFilesOpenerCandidates: ["\u0414\u043E\u0434\u0430\u0458 \u0434\u0430\u0442\u043E\u0442\u0435\u043A\u0435 \u0438 \u0434\u0440\u0443\u0433\u043E"],
   addPhotosFilesMenuItem: ["\u041E\u0442\u043F\u0440\u0435\u043C\u0438 \u0444\u043E\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0458\u0435 \u0438 \u0434\u0430\u0442\u043E\u0442\u0435\u043A\u0435"],
   copyResponse: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"],
-  modeLabels: ["\u0412\u0435\u043E\u043C\u0430 \u0432\u0438\u0441\u043E\u043A\u043E"],
+  modeLabels: ["\u0412\u0435\u043E\u043C\u0430 \u0432\u0438\u0441\u043E\u043A\u043E", "\u0421\u0440\u0435\u0434\u045A\u0435", "\u0412\u0438\u0441\u043E\u043A\u043E"],
   modeOptions: {
+    medium: ["\u0421\u0440\u0435\u0434\u045A\u0435"],
+    high: ["\u0412\u0438\u0441\u043E\u043A\u043E"],
     extraHigh: ["\u0412\u0435\u043E\u043C\u0430 \u0432\u0438\u0441\u043E\u043A\u043E"]
   },
   modeOpenerExtra: ["\u041A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0438\u0448\u0438..."],
@@ -1901,11 +2746,25 @@ var sr = {
     create_image: ["\u041D\u0430\u043F\u0440\u0430\u0432\u0438 \u0441\u043B\u0438\u043A\u0443"]
   },
   signedInMarkers: ["\u041D\u043E\u0432\u043E \u045B\u0430\u0441\u043A\u0430\u045A\u0435", "\u041F\u0440\u0435\u0442\u0440\u0430\u0436\u0438 \u045B\u0430\u0441\u043A\u0430\u045A\u0430", "\u0421\u043A\u043E\u0440\u0430\u0448\u045A\u0438", "\u0418\u0441\u0442\u043E\u0440\u0438\u0458\u0430 \u045B\u0430\u0441\u043A\u0430\u045A\u0430", "\u041F\u0440\u043E\u0458\u0435\u043A\u0442\u0438", "\u041F\u0438\u0442\u0430\u0458 \u0431\u0438\u043B\u043E \u0448\u0442\u0430"],
-  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"]
+  responseActions: ["\u041A\u043E\u043F\u0438\u0440\u0430\u0458 \u043E\u0434\u0433\u043E\u0432\u043E\u0440"],
+  stopControl: ["\u0417\u0430\u0443\u0441\u0442\u0430\u0432\u0438 \u043E\u0434\u0433\u043E\u0432\u0430\u0440\u0430\u045A\u0435"]
 };
 
 // src/dom/locale/mn.ts
 var mn = {
+  configurationAxes: {
+    model: ["\u0417\u0430\u0433\u0432\u0430\u0440"],
+    effort: ["\u0425\u04AF\u0447\u0438\u043D \u0447\u0430\u0440\u043C\u0430\u0439\u043B\u0442"],
+    speed: ["\u0425\u0443\u0440\u0434"]
+  },
+  configurationOptions: {
+    light: ["\u0425\u04E9\u043D\u0433\u04E9\u043D"],
+    medium: ["\u0414\u0443\u043D\u0434"],
+    high: ["\u0418\u0445"],
+    extraHigh: ["\u041C\u0430\u0448 \u0438\u0445"],
+    standard: ["\u0421\u0442\u0430\u043D\u0434\u0430\u0440\u0442"],
+    fast: ["\u0425\u0443\u0440\u0434\u0430\u043D"]
+  },
   composerTextbox: ["\u0414\u0443\u0440\u044B\u043D \u0437\u04AF\u0439\u043B \u0430\u0441\u0443\u0443\u0433\u0430\u0430\u0440\u0430\u0439..."],
   sendButton: ["\u0421\u0430\u043D\u0443\u0443\u043B\u0433\u0430 \u0438\u043B\u0433\u044D\u044D\u0445"],
   searchChatsButton: ["\u0427\u0430\u0442 \u0445\u0430\u0439\u0445"],
@@ -1930,11 +2789,25 @@ var mn = {
     create_image: ["\u0417\u0443\u0440\u0430\u0433 \u04AF\u04AF\u0441\u0433\u044D\u0445"]
   },
   signedInMarkers: ["\u0428\u0438\u043D\u044D \u0447\u0430\u0442", "\u0427\u0430\u0442 \u0445\u0430\u0439\u0445", "\u0421\u0430\u044F\u0445\u043D\u044B \u0437\u04AF\u0439\u043B\u0441", "\u0427\u0430\u0442\u044B\u043D \u0442\u04AF\u04AF\u0445", "\u0422\u04E9\u0441\u043B\u04AF\u04AF\u0434", "\u0414\u0443\u0440\u044B\u043D \u0437\u04AF\u0439\u043B \u0430\u0441\u0443\u0443\u0433\u0430\u0430\u0440\u0430\u0439..."],
-  responseActions: ["\u0425\u0430\u0440\u0438\u0443\u043B\u0442 \u0445\u0443\u0443\u043B\u0430\u0445"]
+  responseActions: ["\u0425\u0430\u0440\u0438\u0443\u043B\u0442 \u0445\u0443\u0443\u043B\u0430\u0445"],
+  stopControl: ["\u0425\u0430\u0440\u0438\u0443\u043B\u0442\u044B\u0433 \u0437\u043E\u0433\u0441\u043E\u043E\u0445"]
 };
 
 // src/dom/locale/my.ts
 var my = {
+  configurationAxes: {
+    model: ["\u1019\u1031\u102C\u103A\u1012\u101A\u103A"],
+    effort: ["\u1021\u102C\u1038\u1011\u102F\u1010\u103A\u1019\u103E\u102F"],
+    speed: ["\u1021\u1019\u103C\u1014\u103A\u1014\u103E\u102F\u1014\u103A\u1038"]
+  },
+  configurationOptions: {
+    light: ["\u1015\u1031\u102B\u1037\u1015\u102B\u1038"],
+    medium: ["\u1021\u101C\u101A\u103A\u1021\u101C\u1010\u103A"],
+    high: ["\u1021\u1019\u103C\u1004\u1037\u103A"],
+    extraHigh: ["\u1021\u101C\u103D\u1014\u103A\u1019\u103C\u1004\u1037\u103A"],
+    standard: ["\u1015\u102F\u1036\u1019\u103E\u1014\u103A"],
+    fast: ["\u1021\u1019\u103C\u1014\u103A"]
+  },
   composerTextbox: ["\u1010\u1005\u103A\u1001\u102F\u1001\u102F \u1019\u1031\u1038\u1015\u102B\u2026"],
   sendButton: ["\u1010\u102F\u1036\u1037\u1015\u103C\u1014\u103A\u100A\u103D\u103E\u1014\u103A\u1000\u103C\u102C\u1038\u1001\u103B\u1000\u103A \u1015\u102D\u102F\u1037\u1019\u100A\u103A"],
   searchChatsButton: ["\u1001\u103B\u1010\u103A\u1019\u103B\u102C\u1038 \u101B\u103E\u102C\u101B\u1014\u103A"],
@@ -1944,11 +2817,11 @@ var my = {
   addFilesOpenerCandidates: ["\u1016\u102D\u102F\u1004\u103A\u1019\u103B\u102C\u1038\u1014\u103E\u1004\u1037\u103A \u1021\u1001\u103C\u102C\u1038\u1021\u101B\u102C\u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1011\u100A\u1037\u103A\u101B\u1014\u103A"],
   addPhotosFilesMenuItem: ["\u1013\u102C\u1010\u103A\u1015\u102F\u1036\u1019\u103B\u102C\u1038\u1014\u103E\u1004\u1037\u103A \u1016\u102D\u102F\u1004\u103A\u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1010\u1004\u103A\u1015\u102B"],
   copyResponse: ["\u1010\u102F\u1036\u1037\u1015\u103C\u1014\u103A\u1019\u103E\u102F \u1000\u1030\u1038\u101A\u1030\u101B\u1014\u103A"],
-  modeLabels: ["\u1001\u103B\u1000\u103A\u1001\u103B\u1004\u103A\u1038", "\u1021\u101C\u101A\u103A\u1021\u101C\u1010\u103A", "\u1019\u103C\u1004\u1037\u103A", "\u1021\u101C\u103D\u1014\u103A\u1019\u103C\u1004\u1037\u103A"],
+  modeLabels: ["\u1001\u103B\u1000\u103A\u1001\u103B\u1004\u103A\u1038", "\u1021\u101C\u101A\u103A\u1021\u101C\u1010\u103A", "\u1019\u103C\u1004\u1037\u103A", "\u1021\u101C\u103D\u1014\u103A\u1019\u103C\u1004\u1037\u103A", "\u1021\u1019\u103C\u1004\u1037\u103A"],
   modeOptions: {
     instant: ["\u1001\u103B\u1000\u103A\u1001\u103B\u1004\u103A\u1038"],
     medium: ["\u1021\u101C\u101A\u103A\u1021\u101C\u1010\u103A"],
-    high: ["\u1019\u103C\u1004\u1037\u103A"],
+    high: ["\u1019\u103C\u1004\u1037\u103A", "\u1021\u1019\u103C\u1004\u1037\u103A"],
     extraHigh: ["\u1021\u101C\u103D\u1014\u103A\u1019\u103C\u1004\u1037\u103A"]
   },
   modeOpenerExtra: ["\u1015\u103C\u102F\u1015\u103C\u1004\u103A\u1019\u103D\u1019\u103A\u1038\u1019\u1036\u101B\u1014\u103A"],
@@ -1958,11 +2831,25 @@ var my = {
     create_image: ["\u101B\u102F\u1015\u103A\u1015\u102F\u1036\u1016\u1014\u103A\u1010\u102E\u1038\u1015\u102B"]
   },
   signedInMarkers: ["\u1001\u103B\u1010\u103A\u1021\u101E\u1005\u103A", "\u1001\u103B\u1010\u103A\u1019\u103B\u102C\u1038 \u101B\u103E\u102C\u101B\u1014\u103A", "\u101C\u1010\u103A\u1010\u101C\u1031\u102C", "\u1001\u103B\u1010\u103A \u1019\u103E\u1010\u103A\u1010\u1019\u103A\u1038", "\u1005\u102E\u1019\u1036\u1000\u102D\u1014\u103A\u1038\u1019\u103B\u102C\u1038", "\u1010\u1005\u103A\u1001\u102F\u1001\u102F \u1019\u1031\u1038\u1015\u102B\u2026"],
-  responseActions: ["\u1010\u102F\u1036\u1037\u1015\u103C\u1014\u103A\u1019\u103E\u102F \u1000\u1030\u1038\u101A\u1030\u101B\u1014\u103A"]
+  responseActions: ["\u1010\u102F\u1036\u1037\u1015\u103C\u1014\u103A\u1019\u103E\u102F \u1000\u1030\u1038\u101A\u1030\u101B\u1014\u103A"],
+  stopControl: ["\u1016\u103C\u1031\u1006\u102D\u102F\u1001\u103C\u1004\u103A\u1038 \u101B\u1015\u103A\u101B\u1014\u103A"]
 };
 
 // src/dom/locale/ta.ts
 var ta = {
+  configurationAxes: {
+    model: ["\u0BAE\u0BBE\u0BA4\u0BBF\u0BB0\u0BBF"],
+    effort: ["\u0BAE\u0BC1\u0BAF\u0BB1\u0BCD\u0B9A\u0BBF"],
+    speed: ["\u0BB5\u0BC7\u0B95\u0BAE\u0BCD"]
+  },
+  configurationOptions: {
+    light: ["\u0B95\u0BC1\u0BB1\u0BC8\u0BB5\u0BC1"],
+    medium: ["\u0BAE\u0BBF\u0BA4\u0BAE\u0BBE\u0BA9"],
+    high: ["\u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9"],
+    extraHigh: ["\u0BAE\u0BBF\u0B95 \u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9"],
+    standard: ["\u0BB5\u0BB4\u0B95\u0BCD\u0B95\u0BAE\u0BBE\u0BA9"],
+    fast: ["\u0BB5\u0BBF\u0BB0\u0BC8\u0BB5\u0BC1"]
+  },
   composerTextbox: ["\u0B8E\u0BA4\u0BC8\u0BAF\u0BC1\u0BAE\u0BCD \u0B95\u0BC7\u0BB3\u0BC1\u0B99\u0BCD\u0B95\u0BB3\u0BCD"],
   sendButton: ["\u0BA4\u0BC2\u0BA3\u0BCD\u0B9F\u0BBF\u0BAF\u0BC8 \u0B85\u0BA9\u0BC1\u0BAA\u0BCD\u0BAA\u0BC1"],
   searchChatsButton: ["\u0B85\u0BB0\u0B9F\u0BCD\u0B9F\u0BC8\u0B95\u0BB3\u0BC8\u0BA4\u0BCD \u0BA4\u0BC7\u0B9F\u0BC1"],
@@ -1972,12 +2859,12 @@ var ta = {
   addFilesOpenerCandidates: ["\u0B95\u0BCB\u0BAA\u0BCD\u0BAA\u0BC1\u0B95\u0BB3\u0BC8\u0BAF\u0BC1\u0BAE\u0BCD \u0BAE\u0BC7\u0BB2\u0BC1\u0BAE\u0BCD \u0BAA\u0BB2\u0BB5\u0BB1\u0BCD\u0BB1\u0BC8\u0BAF\u0BC1\u0BAE\u0BCD \u0B9A\u0BC7\u0BB0\u0BCD"],
   addPhotosFilesMenuItem: ["\u0BAA\u0B9F\u0B99\u0BCD\u0B95\u0BB3\u0BCD \u0BAE\u0BB1\u0BCD\u0BB1\u0BC1\u0BAE\u0BCD \u0B83\u0BAA\u0BC8\u0BB2\u0BCD\u0B95\u0BB3\u0BC8\u0BAA\u0BCD \u0BAA\u0BA4\u0BBF\u0BB5\u0BC7\u0BB1\u0BCD\u0BB1\u0BC1"],
   copyResponse: ["\u0BAA\u0BA4\u0BBF\u0BB2\u0BC8 \u0BA8\u0B95\u0BB2\u0BC6\u0B9F\u0BC1\u0B95\u0BCD\u0B95\u0BB2\u0BBE\u0BAE\u0BCD"],
-  modeLabels: ["\u0B89\u0B9F\u0BA9\u0B9F\u0BBF", "\u0BA8\u0B9F\u0BC1\u0BA4\u0BCD\u0BA4\u0BB0", "\u0B89\u0BAF\u0BB0\u0BCD", "\u0BAE\u0BBF\u0B95 \u0B89\u0BAF\u0BB0\u0BCD\u0BB5\u0BC1", "\u0BAA\u0BCD\u0BB0\u0BCB"],
+  modeLabels: ["\u0B89\u0B9F\u0BA9\u0B9F\u0BBF", "\u0BA8\u0B9F\u0BC1\u0BA4\u0BCD\u0BA4\u0BB0", "\u0B89\u0BAF\u0BB0\u0BCD", "\u0BAE\u0BBF\u0B95 \u0B89\u0BAF\u0BB0\u0BCD\u0BB5\u0BC1", "\u0BAA\u0BCD\u0BB0\u0BCB", "\u0BAE\u0BBF\u0BA4\u0BAE\u0BBE\u0BA9", "\u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9", "\u0BAE\u0BBF\u0B95 \u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9"],
   modeOptions: {
     instant: ["\u0B89\u0B9F\u0BA9\u0B9F\u0BBF"],
-    medium: ["\u0BA8\u0B9F\u0BC1\u0BA4\u0BCD\u0BA4\u0BB0"],
-    high: ["\u0B89\u0BAF\u0BB0\u0BCD"],
-    extraHigh: ["\u0BAE\u0BBF\u0B95 \u0B89\u0BAF\u0BB0\u0BCD\u0BB5\u0BC1"],
+    medium: ["\u0BA8\u0B9F\u0BC1\u0BA4\u0BCD\u0BA4\u0BB0", "\u0BAE\u0BBF\u0BA4\u0BAE\u0BBE\u0BA9"],
+    high: ["\u0B89\u0BAF\u0BB0\u0BCD", "\u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9"],
+    extraHigh: ["\u0BAE\u0BBF\u0B95 \u0B89\u0BAF\u0BB0\u0BCD\u0BB5\u0BC1", "\u0BAE\u0BBF\u0B95 \u0B85\u0BA4\u0BBF\u0B95\u0BAE\u0BBE\u0BA9"],
     pro: ["\u0BAA\u0BCD\u0BB0\u0BCB"]
   },
   modeOpenerExtra: ["\u0B95\u0B9F\u0BCD\u0B9F\u0BAE\u0BC8\u0B95\u0BCD\u0B95\u0BB5\u0BC1\u0BAE\u0BCD..."],
@@ -1987,11 +2874,30 @@ var ta = {
     create_image: ["\u0BAA\u0B9F\u0BA4\u0BCD\u0BA4\u0BC8 \u0B89\u0BB0\u0BC1\u0BB5\u0BBE\u0B95\u0BCD\u0B95\u0BB5\u0BC1\u0BAE\u0BCD"]
   },
   signedInMarkers: ["\u0BAA\u0BC1\u0BA4\u0BBF\u0BAF \u0B85\u0BB0\u0B9F\u0BCD\u0B9F\u0BC8", "\u0B85\u0BB0\u0B9F\u0BCD\u0B9F\u0BC8\u0B95\u0BB3\u0BC8\u0BA4\u0BCD \u0BA4\u0BC7\u0B9F\u0BC1", "\u0B9A\u0BAE\u0BC0\u0BAA\u0BA4\u0BCD\u0BA4\u0BBF\u0BAF\u0BA4\u0BC1", "\u0B85\u0BB0\u0B9F\u0BCD\u0B9F\u0BC8 \u0BB5\u0BB0\u0BB2\u0BBE\u0BB1\u0BC1", "\u0BA4\u0BBF\u0B9F\u0BCD\u0B9F\u0B99\u0BCD\u0B95\u0BB3\u0BCD", "\u0B8E\u0BA4\u0BC8\u0BAF\u0BC1\u0BAE\u0BCD \u0B95\u0BC7\u0BB3\u0BC1\u0B99\u0BCD\u0B95\u0BB3\u0BCD"],
-  responseActions: ["\u0BAA\u0BA4\u0BBF\u0BB2\u0BC8 \u0BA8\u0B95\u0BB2\u0BC6\u0B9F\u0BC1\u0B95\u0BCD\u0B95\u0BB2\u0BBE\u0BAE\u0BCD"]
+  responseActions: ["\u0BAA\u0BA4\u0BBF\u0BB2\u0BC8 \u0BA8\u0B95\u0BB2\u0BC6\u0B9F\u0BC1\u0B95\u0BCD\u0B95\u0BB2\u0BBE\u0BAE\u0BCD"],
+  stopControl: ["\u0BAA\u0BA4\u0BBF\u0BB2\u0BB3\u0BBF\u0BAA\u0BCD\u0BAA\u0BA4\u0BC8 \u0BA8\u0BBF\u0BB1\u0BC1\u0BA4\u0BCD\u0BA4\u0BC1"]
 };
 
 // src/dom/locale/index.ts
 var locales = [en, de, esES, frFR, zhHK, zhTW, ja, it, vi, am, ar, bg, bs, ca, cs, da, el, es419, et, fa, fi, frCA, gu, hi, hr, hu, hy, id, is, ka, kk, kn, ko, lt, zhHans, ur, uk, ptBR, ptPT, pl, sk, ro, nb, ml, ru, pa, mr, tr, sw, te, tl, th, bn, ms, so, nl, sv, lv, mk, sq, sl, sr, mn, my, ta];
+function hasLocaleKey(locale, key) {
+  const value = locale[key];
+  if (typeof value === "string") return value.trim().length > 0;
+  return Array.isArray(value) && value.some((candidate) => typeof candidate === "string" && candidate.trim().length > 0);
+}
+function countLocalesWithKey(localeList, key) {
+  return localeList.filter((locale) => hasLocaleKey(locale, key)).length;
+}
+var localeCoverageSummary = {
+  registeredLocaleCount: locales.length,
+  nonEnglishLocaleCount: Math.max(0, locales.length - 1),
+  runningState: {
+    stopControlLocaleCount: countLocalesWithKey(locales, "stopControl"),
+    stoppedAssistantLocaleCount: countLocalesWithKey(locales, "stoppedAssistant"),
+    nonEnglishStopControlLocaleCount: countLocalesWithKey(locales.slice(1), "stopControl"),
+    nonEnglishStoppedAssistantLocaleCount: countLocalesWithKey(locales.slice(1), "stoppedAssistant")
+  }
+};
 var TOOL_IDS = ["web_search", "deep_research", "create_image"];
 var MODE_OPTION_IDS = [
   "latest",
@@ -2002,6 +2908,26 @@ var MODE_OPTION_IDS = [
   "high",
   "extraHigh",
   "pro"
+];
+var EXPERIENCE_OPTION_IDS = ["chat", "work"];
+var CONFIGURATION_AXIS_IDS = [
+  "model",
+  "intelligence",
+  "effort",
+  "speed",
+  "advanced"
+];
+var CONFIGURATION_OPTION_IDS = [
+  "instant",
+  "light",
+  "medium",
+  "high",
+  "extraHigh",
+  "max",
+  "ultra",
+  "pro",
+  "standard",
+  "fast"
 ];
 function flattenKey(localeList, key) {
   const seen = /* @__PURE__ */ new Set();
@@ -2055,8 +2981,27 @@ function flattenModeOption(localeList, optionId) {
   }
   return result;
 }
+function flattenNestedLabel(localeList, group, id2) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const locale of localeList) {
+    const contribution = locale[group];
+    const value = contribution?.[id2];
+    if (value === void 0) continue;
+    const candidates = typeof value === "string" ? [value] : value;
+    for (const candidate of candidates) {
+      if (candidate.length > 0 && !seen.has(candidate)) {
+        seen.add(candidate);
+        result.push(candidate);
+      }
+    }
+  }
+  return result;
+}
 var nonToolKeys = [
   "composerTextbox",
+  "workComposerTextbox",
+  "newWork",
   "sendButton",
   "searchChatsButton",
   "searchChatsPlaceholder",
@@ -2093,9 +3038,21 @@ var builtTools = Object.fromEntries(
 var builtModeOptions = Object.fromEntries(
   MODE_OPTION_IDS.map((id2) => [id2, flattenModeOption(locales, id2)])
 );
+var builtExperienceOptions = Object.fromEntries(
+  EXPERIENCE_OPTION_IDS.map((id2) => [id2, flattenNestedLabel(locales, "experienceOptions", id2)])
+);
+var builtConfigurationAxes = Object.fromEntries(
+  CONFIGURATION_AXIS_IDS.map((id2) => [id2, flattenNestedLabel(locales, "configurationAxes", id2)])
+);
+var builtConfigurationOptions = Object.fromEntries(
+  CONFIGURATION_OPTION_IDS.map((id2) => [id2, flattenNestedLabel(locales, "configurationOptions", id2)])
+);
 var localeLabels = {
   ...builtLabels,
   modeOptions: builtModeOptions,
+  experienceOptions: builtExperienceOptions,
+  configurationAxes: builtConfigurationAxes,
+  configurationOptions: builtConfigurationOptions,
   tools: builtTools
 };
 function escapeRegExp(value) {
@@ -2125,8 +3082,9 @@ async function readPageState(page) {
   const rawTitle = typeof page.title === "function" ? await page.title().catch(() => void 0) : void 0;
   const title = typeof rawTitle === "string" ? rawTitle : void 0;
   const visibleText = await readVisibleText(page);
-  const blocker = classifyVisibleText(visibleText);
-  const signedIn = isLikelySignedIn(visibleText) && blocker?.kind !== "login_required";
+  const signedIn = isLikelySignedIn(visibleText);
+  const classifiedBlocker = classifyVisibleText(visibleText);
+  const blocker = classifiedBlocker?.kind === "login_required" && signedIn ? void 0 : classifiedBlocker;
   const conversationId = parseConversationId(url);
   const state = {
     url,
@@ -2385,7 +3343,12 @@ function composerTextbox(page) {
   if (typeof page.getByRole !== "function") {
     return requiredLocator(page, "[contenteditable='true'], textarea");
   }
-  return page.getByRole("textbox", { name: anyLabelPattern(localeLabels.composerTextbox) });
+  return page.getByRole("textbox", {
+    name: anyLabelPattern([
+      ...localeLabels.composerTextbox,
+      ...localeLabels.workComposerTextbox
+    ])
+  });
 }
 function sendButton(page) {
   if (typeof page.getByRole !== "function") {
@@ -3142,6 +4105,20 @@ async function readMessages(page, args = {}) {
 }
 async function readLatestMessage(page, role = "assistant", format = "markdown", maxChars) {
   if (typeof page.evaluate === "function") {
+    const normalizedFormat = normalizeResponseFormat(format);
+    if (normalizedFormat === "visible_text" || normalizedFormat === "normalized_text") {
+      const directText = await page.evaluate((wantedRole) => {
+        const __directLatestMessageText = true;
+        void __directLatestMessageText;
+        const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
+        const node = nodes.at(-1);
+        return node?.innerText ?? node?.textContent ?? void 0;
+      }, role).catch(() => void 0);
+      if (directText !== void 0) {
+        const metadata = await readLatestMessageMetadata(page, role);
+        return formatDirectTextMessage(role, directText, normalizedFormat, maxChars, metadata);
+      }
+    }
     const message = await page.evaluate((wantedRole) => {
       const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
       const node = nodes.at(-1);
@@ -3214,6 +4191,60 @@ function normalizeExtractedMessage(message, args = {}) {
   const content = formatMessageHtml(message.html, normalizeResponseFormat(args.format), args.maxChars, metadataHtml);
   return { role: message.role, ...content };
 }
+async function readLatestMessageMetadata(page, role) {
+  return page.evaluate?.((wantedRole) => {
+    const __latestMessageMetadata = true;
+    void __latestMessageMetadata;
+    const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
+    const node = nodes.at(-1);
+    if (node === void 0) return void 0;
+    const turn = node.closest("[data-testid^='conversation-turn']");
+    if (turn === null) return { role: wantedRole, html: "" };
+    const metadataOnly = turn.cloneNode(true);
+    for (const messageNode of Array.from(metadataOnly.querySelectorAll("[data-message-author-role]"))) {
+      messageNode.remove();
+    }
+    return {
+      role: wantedRole,
+      html: "",
+      metadataHtml: metadataOnly.outerHTML
+    };
+  }, role).catch(() => void 0);
+}
+function formatDirectTextMessage(role, directText, format, maxChars, metadata) {
+  const visibleText = normalizeLineBreaks(directText).trim();
+  const normalizedText = normalizeWhitespace(visibleText);
+  const rawText = format === "visible_text" ? visibleText : normalizedText;
+  const captureLimit = maxChars === void 0 ? void 0 : {
+    maxChars,
+    originalChars: rawText.length,
+    clipped: rawText.length > maxChars
+  };
+  const text = captureLimit?.clipped === true ? rawText.slice(0, maxChars) : rawText;
+  const result = {
+    role,
+    text,
+    format,
+    source: "semantic_dom",
+    fidelity: format
+  };
+  if (format === "visible_text") result.visibleText = text;
+  else result.normalizedText = text;
+  if (captureLimit !== void 0) result.captureLimit = captureLimit;
+  if (captureLimit?.clipped === true) {
+    result.warnings = [
+      `Response captured text was clipped by maxChars=${captureLimit.maxChars} from ${captureLimit.originalChars} characters.`
+    ];
+  }
+  if (metadata !== void 0) {
+    const extracted = normalizeExtractedMessage(metadata, { role, format });
+    if (extracted.branch !== void 0) result.branch = extracted.branch;
+    if (extracted.actions !== void 0) result.actions = extracted.actions;
+    if (extracted.thoughtDurationText !== void 0) result.thoughtDurationText = extracted.thoughtDurationText;
+    if (extracted.sourcesAvailable !== void 0) result.sourcesAvailable = extracted.sourcesAvailable;
+  }
+  return result;
+}
 
 // src/commands/context.ts
 async function contextFromPage(page, partial = {}) {
@@ -3266,7 +4297,7 @@ async function attachChatGPTBrowser(env, args = {}) {
     page,
     browserName: browser.name ?? "chrome"
   };
-  const tabId = getTabId(page);
+  const tabId = tabIdFromPage(page);
   if (tabId !== void 0) {
     attached.tabId = tabId;
   }
@@ -3551,7 +4582,7 @@ function mismatchReasonForNoMatches(policy, tabs, chatgptTabs) {
 async function pageMatchesExistingTarget(page, policy) {
   const url = await Promise.resolve(page.url?.()).catch(() => void 0);
   const title = await Promise.resolve(page.title?.()).catch(() => void 0);
-  const tab = { id: getTabId(page) ?? "" };
+  const tab = { id: tabIdFromPage(page) ?? "" };
   if (url !== void 0) tab.url = url;
   if (title !== void 0) tab.title = title;
   return userTabMatchesTarget(tab, policy);
@@ -3764,7 +4795,7 @@ function normalizePage(pageOrTab) {
   }
   return pageOrTab;
 }
-function getTabId(page) {
+function tabIdFromPage(page) {
   const maybe = page;
   const id2 = maybe.id ?? maybe.tabId;
   return typeof id2 === "string" ? id2 : void 0;
@@ -3776,6 +4807,9 @@ async function bootstrap(env, args = {}) {
     const attached = await attachChatGPTBrowser(env, args);
     env.browser = attached.browser;
     env.page = attached.page;
+    if (attached.tabId !== void 0) {
+      env.expectedTabId = attached.tabId;
+    }
     const state = await readPageState(attached.page);
     const data = {
       browserName: attached.browserName,
@@ -3788,6 +4822,50 @@ async function bootstrap(env, args = {}) {
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)));
   }
+}
+async function ensurePage(env) {
+  if (env.page === void 0) {
+    return bootstrap(env, { preferExistingTab: true });
+  }
+  const affinity = await verifyTabAffinity(env);
+  if (affinity !== void 0) {
+    return affinity;
+  }
+  return resultOk({}, await contextFromPage(env.page, tabContext(env)));
+}
+async function verifyTabAffinity(env) {
+  if (env.expectedTabId === void 0 || env.page === void 0) {
+    return void 0;
+  }
+  const actualTabId = tabIdFromPage(env.page);
+  if (actualTabId === env.expectedTabId) {
+    return void 0;
+  }
+  const code = actualTabId === void 0 ? "tab_affinity_unverifiable" : "tab_affinity_lost";
+  const message = actualTabId === void 0 ? `ChatGPT command cannot verify it is still attached to expected tab ${env.expectedTabId}.` : `ChatGPT command would run on tab ${actualTabId}, but the workflow expected tab ${env.expectedTabId}.`;
+  return {
+    ok: false,
+    status: "blocked",
+    warnings: [],
+    blocker: {
+      kind: "selector_drift",
+      code,
+      message,
+      remediation: [
+        {
+          label: "Reclaim the intended tab",
+          instruction: "Run session.bootstrap again with an exact existingTab target, or pass the correct page/tab to createChatGPT before retrying.",
+          userActionRequired: false
+        }
+      ],
+      resumable: false
+    },
+    context: await contextFromPage(env.page, tabContext(env, actualTabId))
+  };
+}
+function tabContext(env, actualTabId = tabIdFromPage(env.page)) {
+  const tabId = actualTabId ?? env.expectedTabId;
+  return tabId === void 0 ? {} : { tabId };
 }
 
 // src/commands/artifacts.ts
@@ -4024,7 +5102,7 @@ async function saveLatestPageAssetImageFromPage(page, destDir, timeoutMs) {
   await mkdir2(absoluteDest, { recursive: true });
   const suggestedFilename = `generated-image-${Date.now()}.${extensionForMime(asset.contentType ?? "image/png")}`;
   const path3 = join2(absoluteDest, suggestedFilename);
-  await copyFile(asset.path, path3);
+  await copyFile2(asset.path, path3);
   const saved = await stat2(path3);
   if (saved.size <= 0) {
     throw new Error(`Generated image artifact file is empty: ${path3}`);
@@ -4173,12 +5251,6 @@ function artifactDownloadBlocker(error, context) {
     context
   };
 }
-async function ensurePage(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
-}
 async function hasStopControl(page, timeoutMs) {
   if (typeof page.evaluate !== "function") return false;
   return withTimeout(
@@ -4207,18 +5279,22 @@ import path2 from "node:path";
 
 // src/platform/local-paths.ts
 import path from "node:path";
-function isHostAbsolutePath(value, platform = process.platform) {
+import { platform as readHostPlatform } from "node:os";
+function currentHostPathPlatform() {
+  return readHostPlatform();
+}
+function isHostAbsolutePath(value, platform = currentHostPathPlatform()) {
   if (value.length === 0) return false;
   if (platform === "win32") return isFullyQualifiedWindowsPath(value);
   return path.posix.isAbsolute(value);
 }
-function resolveForHostPath(value, platform = process.platform) {
+function resolveForHostPath(value, platform = currentHostPathPlatform()) {
   if (!isHostAbsolutePath(value, platform)) {
     throw new Error(`File attachment path must be absolute for the backend host: ${value}`);
   }
   return platform === "win32" ? path.win32.resolve(value) : path.posix.resolve(value);
 }
-function basenameForHostPath(value, platform = process.platform) {
+function basenameForHostPath(value, platform = currentHostPathPlatform()) {
   return platform === "win32" ? path.win32.basename(value) : path.posix.basename(value);
 }
 function isFullyQualifiedWindowsPath(value) {
@@ -4342,7 +5418,7 @@ async function attachFiles(env, args) {
   if (!preflight.ok || preflight.data === void 0) {
     return preflight;
   }
-  const boot = await ensurePage2(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -4450,7 +5526,7 @@ async function fileMetadata(absolute, bytes, includeHash = false) {
   return metadata;
 }
 function extensionForHostPath(value) {
-  return process.platform === "win32" ? path2.win32.extname(value).toLowerCase() : path2.posix.extname(value).toLowerCase();
+  return currentHostPathPlatform() === "win32" ? path2.win32.extname(value).toLowerCase() : path2.posix.extname(value).toLowerCase();
 }
 function collectFilePreflightWarnings(files, warnings) {
   const byPath = /* @__PURE__ */ new Map();
@@ -4709,12 +5785,30 @@ async function locatorCount(locator) {
   return locator.count();
 }
 async function downloadLatestFile(env, args) {
-  const boot = await ensurePage2(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
   const page = env.page;
   try {
+    const generatedFileDownload = await tryGeneratedFilePreviewDownload(page, args);
+    if (generatedFileDownload !== void 0) {
+      return generatedFileDownload;
+    }
+    if (args.filenamePattern !== void 0) {
+      return {
+        ok: false,
+        status: "unsupported",
+        warnings: [],
+        blocker: {
+          kind: "download_unavailable",
+          code: "download_filename_not_found",
+          message: `No visible ChatGPT file affordance matched filenamePattern ${JSON.stringify(args.filenamePattern)}.`,
+          resumable: true
+        },
+        context: await contextFromPage(page)
+      };
+    }
     const controls = requiredLocator(page, cssSelectors.downloadControls);
     let count;
     try {
@@ -4763,6 +5857,152 @@ async function downloadLatestFile(env, args) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
 }
+async function tryGeneratedFilePreviewDownload(page, args) {
+  const timeoutMs = args.timeoutMs ?? 12e4;
+  const candidates = await inspectGeneratedFileAffordances(page, localGuardTimeout(timeoutMs, 5e3));
+  const selected = selectGeneratedFileAffordance(candidates, args);
+  if (selected === void 0) return void 0;
+  try {
+    const assistantMessages = requiredLocator(page, cssSelectors.assistantMessages);
+    const assistantCount = await locatorCountWithTimeout(
+      assistantMessages,
+      localGuardTimeout(timeoutMs, 5e3),
+      "generated_file_assistant_count_timeout"
+    );
+    if (selected.assistantIndex < 0 || selected.assistantIndex >= assistantCount) {
+      throw new Error("The selected generated-file assistant turn is no longer present.");
+    }
+    const assistant = assistantMessages.nth?.(selected.assistantIndex) ?? assistantMessages;
+    const role = selected.tag === "button" ? "button" : "link";
+    const affordance = assistant.getByRole?.(role, { name: selected.filename, exact: true }) ?? assistant.locator?.(`${selected.tag}[aria-label="${escapeCssAttribute(selected.filename)}"]`);
+    const affordanceCount = await locatorCountWithTimeout(
+      affordance,
+      localGuardTimeout(timeoutMs, 5e3),
+      "generated_file_affordance_count_timeout"
+    );
+    if (affordance === void 0 || affordanceCount !== 1 || typeof affordance.click !== "function") {
+      throw new Error(`Expected one clickable generated-file affordance for ${selected.filename}, found ${affordanceCount}.`);
+    }
+    if (selected.tag === "a") {
+      const downloaded2 = await waitForDownloadFromClick(
+        page,
+        () => affordance.click({ timeoutMs: localGuardTimeout(timeoutMs, 1e4) }),
+        args.destDir,
+        timeoutMs,
+        selected.filename
+      );
+      return resultOk(downloaded2, await contextFromPage(page));
+    }
+    await affordance.click({ timeoutMs: localGuardTimeout(timeoutMs, 1e4) });
+    const preview = requiredLocator(page, `section[aria-label="${escapeCssAttribute(selected.filename)}"]`);
+    const download = await waitForPreviewDownloadControl(page, preview, timeoutMs);
+    if (download === void 0) {
+      throw new Error(`The artifact preview for ${selected.filename} did not expose a visible Download control.`);
+    }
+    const downloaded = await waitForDownloadFromClick(
+      page,
+      async () => download.click?.({ timeoutMs: localGuardTimeout(timeoutMs, 1e4) }),
+      args.destDir,
+      timeoutMs,
+      selected.filename
+    );
+    return resultOk(downloaded, await contextFromPage(page));
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+async function inspectGeneratedFileAffordances(page, timeoutMs) {
+  if (typeof page.evaluate === "function") {
+    const fromDom = await withTimeout(
+      page.evaluate(() => {
+        const visible = (element) => {
+          let current = element;
+          while (current !== null) {
+            const html2 = current;
+            const style = window.getComputedStyle(html2);
+            const rect = html2.getBoundingClientRect();
+            if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || "1") <= 0) return false;
+            if (current === element && (rect.width <= 0 || rect.height <= 0)) return false;
+            current = current.parentElement;
+          }
+          return true;
+        };
+        const fileLike = (value) => /^[^\\/\r\n]{1,255}\.[a-z0-9][a-z0-9._-]{0,15}$/i.test(value);
+        const assistants = Array.from(document.querySelectorAll("[data-message-author-role='assistant']"));
+        return assistants.flatMap((assistant, assistantIndex) => Array.from(assistant.querySelectorAll("button[aria-label], a[download], a[href*='/backend-api/files/']")).filter(visible).map((element) => ({
+          assistantIndex,
+          filename: (element.getAttribute("aria-label") ?? element.textContent ?? "").trim(),
+          tag: element.tagName.toLocaleLowerCase(),
+          text: (element.textContent ?? "").trim()
+        })).filter((item) => (item.tag === "button" || item.tag === "a") && fileLike(item.filename) && item.filename === item.text).map(({ assistantIndex: assistantIndex2, filename, tag }) => ({ assistantIndex: assistantIndex2, filename, tag })));
+      }),
+      timeoutMs,
+      "Timed out while inspecting generated-file buttons."
+    ).catch(() => void 0);
+    if (Array.isArray(fromDom)) return fromDom;
+  }
+  if (typeof page.content !== "function") return [];
+  const html = await withTimeout(
+    page.content(),
+    timeoutMs,
+    "Timed out while reading generated-file button markup."
+  ).catch(() => "");
+  const candidates = [];
+  const buttonPattern = /<(button|a)\b[^>]*\baria-label=(['"])(.*?)\2[^>]*>([\s\S]*?)<\/\1>/gi;
+  let match;
+  while ((match = buttonPattern.exec(html)) !== null) {
+    const filename = decodeBasicHtml(match[3] ?? "").trim();
+    const text = decodeBasicHtml((match[4] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    if (/^[^\\/\r\n]{1,255}\.[a-z0-9][a-z0-9._-]{0,15}$/i.test(filename) && filename === text) {
+      candidates.push({ assistantIndex: 0, filename, tag: (match[1] ?? "button").toLocaleLowerCase() });
+    }
+  }
+  return candidates;
+}
+function selectGeneratedFileAffordance(candidates, args) {
+  let scoped = candidates;
+  const from = args.from;
+  if (typeof from === "object" && from !== null) {
+    scoped = scoped.filter((candidate) => candidate.assistantIndex === from.assistantIndex);
+  } else if (from !== "visible_conversation") {
+    const latestAssistant = Math.max(-1, ...scoped.map((candidate) => candidate.assistantIndex));
+    scoped = scoped.filter((candidate) => candidate.assistantIndex === latestAssistant);
+  }
+  if (args.filenamePattern !== void 0) {
+    scoped = scoped.filter((candidate) => filenameMatches(candidate.filename, args.filenamePattern));
+  }
+  return scoped.at(-1);
+}
+function filenameMatches(filename, pattern) {
+  try {
+    return new RegExp(pattern, "i").test(filename);
+  } catch {
+    return filename.toLocaleLowerCase().includes(pattern.toLocaleLowerCase());
+  }
+}
+async function waitForPreviewDownloadControl(page, preview, timeoutMs) {
+  const deadline = Date.now() + Math.min(timeoutMs, 15e3);
+  while (Date.now() < deadline) {
+    for (const label of localeLabels.download) {
+      const control = preview.getByRole?.("button", { name: label, exact: true }) ?? preview.locator?.(`button[aria-label="${escapeCssAttribute(label)}"]`);
+      if (await locatorCountWithTimeout(control, localGuardTimeout(timeoutMs, 2e3), "artifact_preview_download_count_timeout") === 1) {
+        return control;
+      }
+    }
+    if (typeof page.waitForTimeout === "function") {
+      await page.waitForTimeout(100);
+    } else {
+      await new Promise((resolve3) => setTimeout(resolve3, 100));
+    }
+  }
+  return void 0;
+}
+function escapeCssAttribute(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]/g, " ");
+}
+function decodeBasicHtml(value) {
+  return value.replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+}
 async function setHiddenFileInput(page, files) {
   if (page === void 0) {
     throw new Error("No active page is available for file upload.");
@@ -4799,12 +6039,6 @@ async function readBrowserInputDiagnostic(page) {
       })
     };
   });
-}
-async function ensurePage2(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
 }
 async function setFilesViaDomDataTransfer(page, files) {
   const totalBytes = files.reduce((sum, file) => sum + file.bytes, 0);
@@ -6049,6 +7283,17 @@ function localizationCheck(env) {
   const missingModeOptionIds = REQUIRED_MODE_OPTION_IDS.filter((id2) => (localeLabels.modeOptions[id2]?.length ?? 0) === 0);
   const toolIds = Object.keys(localeLabels.tools);
   const modeOptionIds = Object.keys(localeLabels.modeOptions);
+  const proAliases = [...localeLabels.modeOptions.pro];
+  const supportsProExtendedAlias = proAliases.some((alias) => /pro\s*(?:•\s*)?extended/i.test(alias)) && proAliases.some((alias) => /extended\s+pro/i.test(alias));
+  const runningStateLocalizationSupport = runningStateSupport();
+  const runningStateLabelCoverage = {
+    support: runningStateLocalizationSupport,
+    stopControlCandidateCount: localeLabels.stopControl.length,
+    stoppedAssistantCandidateCount: localeLabels.stoppedAssistant.length,
+    ...localeCoverageSummary.runningState,
+    registeredLocaleCount: localeCoverageSummary.registeredLocaleCount,
+    nonEnglishLocaleCount: localeCoverageSummary.nonEnglishLocaleCount
+  };
   const englishCanonicalPresent = localeLabels.composerTextbox[0] === "Chat with ChatGPT" && localeLabels.sendButton[0] === "Send prompt" && localeLabels.modeLabels.includes("Thinking") && localeLabels.modeOptions.pro?.[0] === "Pro" && localeLabels.tools.web_search?.[0] === "Web search";
   const labelCandidateCount = REQUIRED_LOCALE_KEYS.reduce((total, key) => total + localeLabels[key].length, 0) + Object.values(localeLabels.tools).reduce((total, values) => total + values.length, 0) + Object.values(localeLabels.modeOptions).reduce((total, values) => total + values.length, 0);
   const details = {
@@ -6058,12 +7303,16 @@ function localizationCheck(env) {
     missingModeOptionIds,
     toolIds,
     modeOptionIds,
+    proAliases,
+    supportsProExtendedAlias,
+    runningStateLabelCoverage,
     labelCandidateCount,
     pageAvailable: env.page !== void 0,
     runtimeSelectorCoverage: "registry_only_stage_2"
   };
   if (englishCanonicalPresent && requiredKeysMissing.length === 0 && missingToolIds.length === 0 && missingModeOptionIds.length === 0) {
-    return unknown("The locale registry is loaded; localized runtime selector coverage is registry-only in Stage 2 and not fully proven.", void 0, details);
+    const runningStateMessage = runningStateLocalizationSupport === "complete" ? "running-state labels are present for every registered non-English locale" : runningStateLocalizationSupport === "partial" ? "running-state labels are partially localized" : runningStateLocalizationSupport === "english_only" ? "running-state labels are English-only" : "running-state labels are missing";
+    return unknown(`The locale registry is loaded; localized runtime selector coverage is registry-only in Stage 2 and ${runningStateMessage}.`, void 0, details);
   }
   return blocked(
     "The locale registry is missing canonical labels required for selector fallback.",
@@ -6071,6 +7320,16 @@ function localizationCheck(env) {
     details,
     "selector_drift"
   );
+}
+function runningStateSupport() {
+  const coverage = localeCoverageSummary.runningState;
+  const hasEnglishStop = coverage.stopControlLocaleCount > coverage.nonEnglishStopControlLocaleCount;
+  const hasEnglishStopped = coverage.stoppedAssistantLocaleCount > coverage.nonEnglishStoppedAssistantLocaleCount;
+  const hasEnglishFallback = hasEnglishStop && hasEnglishStopped;
+  const allNonEnglishCovered = localeCoverageSummary.nonEnglishLocaleCount > 0 && coverage.nonEnglishStopControlLocaleCount >= localeCoverageSummary.nonEnglishLocaleCount && coverage.nonEnglishStoppedAssistantLocaleCount >= localeCoverageSummary.nonEnglishLocaleCount;
+  if (allNonEnglishCovered) return "complete";
+  if (coverage.nonEnglishStopControlLocaleCount > 0 || coverage.nonEnglishStoppedAssistantLocaleCount > 0) return "partial";
+  return hasEnglishFallback ? "english_only" : "missing";
 }
 async function reportsCheck(options) {
   const destDir = options?.destDir ?? "reports/runs";
@@ -6179,23 +7438,38 @@ async function readAssistantGenerationState(page) {
         const style = window.getComputedStyle(element);
         return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true";
       };
-      const visibleButtons = Array.from(document.querySelectorAll("button")).filter((button) => isVisible(button) && button.disabled !== true && button.getAttribute("aria-disabled") !== "true");
-      const buttonTexts = visibleButtons.map((button) => [
-        button.innerText,
-        button.textContent,
-        button.getAttribute("aria-label"),
-        button.getAttribute("title")
-      ].map(normalize).filter(Boolean).join(" ")).filter(Boolean);
-      const haystacks = buttonTexts;
-      const matchingSignals = (phrases) => haystacks.flatMap(
+      const elementText = (element) => [
+        element.innerText,
+        element.textContent,
+        element.getAttribute("aria-label"),
+        element.getAttribute("title")
+      ].map(normalize).filter(Boolean).join(" ");
+      const visibleButtons = Array.from(document.querySelectorAll("button")).filter((button) => isVisible(button));
+      const activeButtonTexts = visibleButtons.filter((button) => button.disabled !== true && button.getAttribute("aria-disabled") !== "true").map((button) => elementText(button)).filter(Boolean);
+      const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
+      const latestAssistantTurn = [...turns].reverse().find(
+        (turn) => turn.querySelector("[data-message-author-role='assistant']") !== null
+      );
+      const explicitStatusElements = Array.from(document.querySelectorAll(
+        "[role='status'],[aria-live],[data-testid*='status'],[data-testid*='stopped']"
+      ));
+      const latestTurnUiElements = latestAssistantTurn === void 0 ? [] : Array.from(latestAssistantTurn.querySelectorAll("*"));
+      const stoppedUiTexts = [...new Set([...latestTurnUiElements, ...explicitStatusElements].filter((element) => {
+        const htmlElement = element;
+        const insideMessageProse = typeof htmlElement.closest === "function" && htmlElement.closest("[data-message-author-role]") !== null;
+        const containsMessageProse = typeof htmlElement.querySelector === "function" && htmlElement.querySelector("[data-message-author-role]") !== null;
+        return !insideMessageProse && !containsMessageProse && isVisible(htmlElement);
+      }).map((element) => elementText(element)).filter(Boolean))];
+      const matchingSignals = (texts, phrases) => texts.flatMap(
         (text) => phrases.map((phrase) => phrase.toLowerCase()).filter((phrase) => text.includes(phrase))
       );
-      const activeSignals = matchingSignals(args.stop);
-      const stoppedSignals = matchingSignals(args.stopped);
+      const activeSignals = matchingSignals(activeButtonTexts, args.stop);
+      const stoppedSignals = matchingSignals(stoppedUiTexts, args.stopped);
+      const diagnosticTexts = [...activeButtonTexts, ...stoppedUiTexts].filter((text) => [...args.stop, ...args.stopped].some((phrase) => text.includes(phrase.toLowerCase()))).map((text) => text.slice(0, 160));
       return {
         active: activeSignals.length > 0,
         stopped: stoppedSignals.length > 0,
-        signals: [.../* @__PURE__ */ new Set([...activeSignals, ...stoppedSignals, ...buttonTexts.filter((text) => /stop|cancel|stopped|answering|thinking/i.test(text))])].slice(0, 5)
+        signals: [.../* @__PURE__ */ new Set([...activeSignals, ...stoppedSignals, ...diagnosticTexts])].slice(0, 5)
       };
     }, {
       stop: [...localeLabels.stopControl],
@@ -6298,32 +7572,43 @@ async function readWaitDomSnapshot(page) {
       const style = window.getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true";
     };
-    const visibleButtons = Array.from(document.querySelectorAll("button")).filter((button) => isVisible(button) && button.disabled !== true && button.getAttribute("aria-disabled") !== "true");
-    const buttonTexts = visibleButtons.map((button) => [
-      button.innerText,
-      button.textContent,
-      button.getAttribute("aria-label"),
-      button.getAttribute("title")
-    ].map(normalizeLower).filter(Boolean).join(" ")).filter(Boolean);
-    const haystacks = buttonTexts;
-    const matchingSignals = (phrases) => haystacks.flatMap(
+    const elementText = (element) => [
+      element.innerText,
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ].map(normalizeLower).filter(Boolean).join(" ");
+    const visibleButtons = Array.from(document.querySelectorAll("button")).filter((button) => isVisible(button));
+    const activeButtonTexts = visibleButtons.filter((button) => button.disabled !== true && button.getAttribute("aria-disabled") !== "true").map((button) => elementText(button)).filter(Boolean);
+    const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
+    const latestTurn = [...turns].reverse().find(
+      (turn) => turn.querySelector("[data-message-author-role='assistant']") !== null
+    );
+    const explicitStatusElements = Array.from(document.querySelectorAll(
+      "[role='status'],[aria-live],[data-testid*='status'],[data-testid*='stopped']"
+    ));
+    const latestTurnUiElements = latestTurn === void 0 ? [] : Array.from(latestTurn.querySelectorAll("*"));
+    const stoppedUiTexts = [...new Set([...latestTurnUiElements, ...explicitStatusElements].filter((element) => {
+      const htmlElement = element;
+      const insideMessageProse = typeof htmlElement.closest === "function" && htmlElement.closest("[data-message-author-role]") !== null;
+      const containsMessageProse = typeof htmlElement.querySelector === "function" && htmlElement.querySelector("[data-message-author-role]") !== null;
+      return !insideMessageProse && !containsMessageProse && isVisible(htmlElement);
+    }).map((element) => elementText(element)).filter(Boolean))];
+    const matchingSignals = (texts, phrases) => texts.flatMap(
       (text) => phrases.map((phrase) => phrase.toLowerCase()).filter((phrase) => text.includes(phrase))
     );
-    const activeSignals = matchingSignals(args.stop);
-    const stoppedSignals = matchingSignals(args.stopped);
+    const activeSignals = matchingSignals(activeButtonTexts, args.stop);
+    const stoppedSignals = matchingSignals(stoppedUiTexts, args.stopped);
+    const diagnosticTexts = [...activeButtonTexts, ...stoppedUiTexts].filter((text) => [...args.stop, ...args.stopped].some((phrase) => text.includes(phrase.toLowerCase()))).map((text) => text.slice(0, 160));
     const generation = {
       active: activeSignals.length > 0,
       stopped: stoppedSignals.length > 0,
-      signals: [.../* @__PURE__ */ new Set([...activeSignals, ...stoppedSignals, ...buttonTexts.filter((text) => /stop|cancel|stopped|answering|thinking/i.test(text))])].slice(0, 5)
+      signals: [.../* @__PURE__ */ new Set([...activeSignals, ...stoppedSignals, ...diagnosticTexts])].slice(0, 5)
     };
-    const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
     let hasResponseActions;
     if (turns.length === 0) {
       hasResponseActions = void 0;
     } else {
-      const latestTurn = [...turns].reverse().find(
-        (turn) => turn.querySelector("[data-message-author-role='assistant']") !== null
-      );
       if (latestTurn === void 0) {
         hasResponseActions = false;
       } else {
@@ -6463,7 +7748,7 @@ function isResponseComplete(snapshot) {
   return snapshot.latestText.trim().length > 0 && !isTransientAssistantText(snapshot.latestText) && snapshot.textStableForMs >= snapshot.stableMs && !snapshot.generation.active && !snapshot.generation.stopped && snapshot.hasResponseActions;
 }
 async function composeMessage(env, args) {
-  const boot = await ensurePage3(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -6494,7 +7779,7 @@ async function composeMessage(env, args) {
   }
 }
 async function submitMessage(env, args = {}) {
-  const boot = await ensurePage3(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -6548,10 +7833,20 @@ async function submitMessage(env, args = {}) {
     }
     if (userTurn === void 0) {
       const latestUser = await readLatestMessage(page, "user", "normalized_text");
+      const generation = await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE);
+      const turnCount = await countPageMessages(page).catch(() => void 0);
       if (submittedUserTurnMatches(latestUser?.text, args.text)) {
         return resultOk(
-          submitData(latestUser?.text, await countPageMessages(page).catch(() => void 0)),
+          submitData(latestUser?.text, turnCount, generation.active ? "submitted_generating" : "submitted", generation),
           await contextFromPage(page)
+        );
+      }
+      const turnAdvanced = previousTurnCount !== void 0 && turnCount !== void 0 && turnCount > previousTurnCount;
+      if (turnAdvanced || generation.active) {
+        return resultOk(
+          submitData(void 0, turnCount, generation.active ? "submitted_generating" : "submitted_unconfirmed", generation),
+          await contextFromPage(page),
+          ["Submitted prompt could not be matched to a rendered user turn yet, but ChatGPT page state indicates progress."]
         );
       }
       return {
@@ -6567,7 +7862,12 @@ async function submitMessage(env, args = {}) {
       };
     }
     return resultOk(
-      submitData(userTurn, await countPageMessages(page).catch(() => void 0)),
+      submitData(
+        userTurn,
+        await countPageMessages(page).catch(() => void 0),
+        "submitted",
+        await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE)
+      ),
       await contextFromPage(page)
     );
   } catch (error) {
@@ -6693,7 +7993,27 @@ function describeSendState(state) {
   return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 async function waitForMessage(env, args = {}) {
-  const boot = await ensurePage3(env);
+  const completionGate = validateCompletionGate(args.completionGate);
+  if (!completionGate.ok) {
+    return {
+      ok: false,
+      status: "error",
+      data: {
+        complete: false,
+        assistantTurnCount: 0,
+        elapsedMs: 0,
+        completionGate: completionGate.data
+      },
+      warnings: [],
+      error: {
+        name: "InvalidCompletionGate",
+        message: completionGate.data.reason,
+        recoverable: false
+      },
+      context: { timestamp: (/* @__PURE__ */ new Date()).toISOString() }
+    };
+  }
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -6713,6 +8033,8 @@ async function waitForMessage(env, args = {}) {
   let lastChangedAt = Date.now();
   let lastObservedTextLength = 0;
   let latestAssistantCount = await countPageMessages(page, "assistant").catch(() => 0);
+  let lastGeneration = EMPTY_GENERATION_STATE;
+  let completionGateCache;
   while (Date.now() - started < timeoutMs) {
     const probeResult = await waitSnapshotProbe(page, deadline, { timeoutMs: probeTimeoutMs });
     addWarnings(waitWarnings, probeResult.warnings);
@@ -6727,6 +8049,9 @@ async function waitForMessage(env, args = {}) {
     if (targetKey !== lastTargetKey) {
       lastTargetKey = targetKey;
       lastChangedAt = Date.now();
+      if (completionGateCache?.targetKey !== targetKey) {
+        completionGateCache = void 0;
+      }
     }
     if (targetReached && snapshot.text.length > 0) {
       lastObservedTextLength = snapshot.text.length;
@@ -6745,9 +8070,16 @@ async function waitForMessage(env, args = {}) {
     }
     pollIndex += 1;
     const hasResponseActions = await resolveResponseActions(page, snapshot);
+    lastGeneration = snapshot.generation;
     if (targetReached && snapshot.generation.stopped && snapshot.text.length > 0) {
       const stoppedText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
       const data = stoppedText.length > 0 ? waitDataFromText(args, false, stoppedText, latestAssistantCount, Date.now() - started) : waitDataWithoutText(latestAssistantCount, Date.now() - started);
+      if (stoppedText.length > 0 && completionGate.gate !== void 0) {
+        data.completionGate = evaluateCompletionGate(stoppedText, completionGate.gate);
+      }
+      data.completionState = "stopped";
+      data.generationActive = snapshot.generation.active;
+      data.generationSignals = snapshot.generation.signals;
       if (stoppedText.length === 0) {
         waitWarnings.add(`The interrupted assistant text (~${snapshot.text.length} chars observed) could not be re-read at wait exit; call messages.readLatest on the same thread to capture it.`);
       }
@@ -6758,6 +8090,7 @@ async function waitForMessage(env, args = {}) {
         warnings: [
           ...waitWarnings,
           ...stoppedText.length > 0 ? responseContentWarnings(args, false) : [],
+          ...data.completionGate === void 0 ? [] : completionGateWarnings(data.completionGate),
           "ChatGPT generation appears to have been stopped or interrupted before completion.",
           ...snapshot.generation.signals.map((signal) => `Generation state signal: ${signal}`)
         ],
@@ -6766,6 +8099,10 @@ async function waitForMessage(env, args = {}) {
     }
     const metadataComplete = targetReached && snapshot.text.length > 0 && !snapshot.text.transient && Date.now() - lastChangedAt >= stableMs && !snapshot.generation.active && !snapshot.generation.stopped && hasResponseActions;
     if (metadataComplete) {
+      if (completionGateCache?.targetKey === targetKey && completionGateCache.data.status !== "complete") {
+        await sleep2(page, pollMs);
+        continue;
+      }
       const latestText = normalizeWhitespace(await fetchLatestAssistantText(page) ?? "");
       const fetchedMetadata = waitTextMetadata(latestText);
       const completionSnapshot = {
@@ -6776,7 +8113,17 @@ async function waitForMessage(env, args = {}) {
         hasResponseActions
       };
       if (fetchedMetadata.hash === snapshot.text.hash && isResponseComplete(completionSnapshot)) {
+        const gateData = completionGate.gate === void 0 ? void 0 : evaluateCompletionGate(latestText, completionGate.gate);
+        if (gateData !== void 0 && gateData.status !== "complete") {
+          completionGateCache = { targetKey, text: latestText, data: gateData };
+          await sleep2(page, pollMs);
+          continue;
+        }
         const data = waitDataFromText(args, true, latestText, latestAssistantCount, Date.now() - started);
+        if (gateData !== void 0) data.completionGate = gateData;
+        data.completionState = "complete";
+        data.generationActive = false;
+        data.generationSignals = snapshot.generation.signals;
         return withCommandOutputText(resultOk(
           data,
           await contextFromPage(page),
@@ -6792,14 +8139,27 @@ async function waitForMessage(env, args = {}) {
     await sleep2(page, pollMs);
   }
   if (lastObservedTextLength > 0) {
-    const partialText = await fetchLatestAssistantText(page);
+    const cachedPartial = completionGateCache?.targetKey === lastTargetKey ? completionGateCache : void 0;
+    const partialText = cachedPartial?.text ?? await fetchLatestAssistantText(page);
     if (partialText !== void 0 && normalizeWhitespace(partialText).length > 0) {
-      const data = waitDataFromText(args, false, normalizeWhitespace(partialText), latestAssistantCount, Date.now() - started);
+      const normalizedPartialText = normalizeWhitespace(partialText);
+      const data = waitDataFromText(args, false, normalizedPartialText, latestAssistantCount, Date.now() - started);
+      if (completionGate.gate !== void 0) {
+        data.completionGate = cachedPartial?.data ?? evaluateCompletionGate(normalizedPartialText, completionGate.gate);
+      }
+      data.completionState = completionStateFromGeneration(lastGeneration, false, normalizedPartialText.length > 0);
+      data.generationActive = lastGeneration.active;
+      data.generationSignals = lastGeneration.signals;
       return withCommandOutputText({
         ok: false,
         status: "partial",
         data,
-        warnings: [...waitWarnings, ...responseContentWarnings(args, false), "Timed out after receiving partial assistant text."],
+        warnings: [
+          ...waitWarnings,
+          ...responseContentWarnings(args, false),
+          ...data.completionGate === void 0 ? [] : completionGateWarnings(data.completionGate),
+          "Timed out after receiving partial assistant text."
+        ],
         context: await contextFromPage(page)
       });
     }
@@ -6895,6 +8255,97 @@ function responseContentWarnings(args, complete) {
     complete ? "Assistant response text was omitted because responseContent is metadata; call readLatest to capture the completed answer." : "Partial assistant text was omitted because responseContent is metadata; call wait again on the same thread or readLatest after completion."
   ];
 }
+function validateCompletionGate(gate) {
+  if (gate === void 0) return { ok: true };
+  if (gate === null || typeof gate !== "object" || Array.isArray(gate)) {
+    return invalidCompletionGate("Completion gate must be an object with start and end boundaries.");
+  }
+  const candidate = gate;
+  if (typeof candidate.start !== "string" || candidate.start.trim().length === 0) {
+    return invalidCompletionGate("Completion gate start must be a non-empty string.");
+  }
+  if (typeof candidate.end !== "string" || candidate.end.trim().length === 0) {
+    return invalidCompletionGate("Completion gate end must be a non-empty string.");
+  }
+  if (candidate.start !== candidate.start.trim() || candidate.end !== candidate.end.trim()) {
+    return invalidCompletionGate("Completion gate boundaries must not contain leading or trailing whitespace.");
+  }
+  if (candidate.start === candidate.end) {
+    return invalidCompletionGate("Completion gate start and end must be distinct.");
+  }
+  if (candidate.start.includes(candidate.end) || candidate.end.includes(candidate.start)) {
+    return invalidCompletionGate("Completion gate boundaries must not contain one another.");
+  }
+  if (candidate.requireUnique !== void 0 && typeof candidate.requireUnique !== "boolean") {
+    return invalidCompletionGate("Completion gate requireUnique must be a boolean when provided.");
+  }
+  if (candidate.requireNonEmptyBody !== void 0 && typeof candidate.requireNonEmptyBody !== "boolean") {
+    return invalidCompletionGate("Completion gate requireNonEmptyBody must be a boolean when provided.");
+  }
+  return {
+    ok: true,
+    gate: {
+      start: candidate.start,
+      end: candidate.end,
+      requireUnique: candidate.requireUnique ?? true,
+      requireNonEmptyBody: candidate.requireNonEmptyBody ?? true
+    }
+  };
+}
+function invalidCompletionGate(reason) {
+  return {
+    ok: false,
+    data: {
+      status: "invalid_boundary",
+      reason
+    }
+  };
+}
+function evaluateCompletionGate(text, gate) {
+  const boundedText = text.trim();
+  const startCount = countOccurrences(boundedText, gate.start);
+  const endCount = countOccurrences(boundedText, gate.end);
+  const state = (status, reason) => ({
+    status,
+    reason,
+    startCount,
+    endCount
+  });
+  if (!boundedText.startsWith(gate.start)) {
+    return state("start_missing", "Assistant text does not begin with the completion gate start boundary.");
+  }
+  if (!boundedText.endsWith(gate.end)) {
+    return state("end_missing", "Assistant text does not end with the completion gate end boundary.");
+  }
+  if (gate.requireUnique && startCount !== 1) {
+    return state("duplicate_start", "Assistant text contains more than one completion gate start boundary.");
+  }
+  if (gate.requireUnique && endCount !== 1) {
+    return state("duplicate_end", "Assistant text contains more than one completion gate end boundary.");
+  }
+  const body = boundedText.slice(gate.start.length, boundedText.length - gate.end.length);
+  if (gate.requireNonEmptyBody && body.trim().length === 0) {
+    return state("empty_body", "Assistant text contains no non-whitespace content between completion gate boundaries.");
+  }
+  return state("complete", "Completion gate boundaries and body are complete.");
+}
+function countOccurrences(text, marker) {
+  let count = 0;
+  let offset = 0;
+  while (offset <= text.length - marker.length) {
+    const index = text.indexOf(marker, offset);
+    if (index < 0) break;
+    count += 1;
+    offset = index + 1;
+  }
+  return count;
+}
+function completionGateWarnings(gate) {
+  if (gate.status === "complete") return [];
+  return [
+    `Completion gate is not satisfied (${gate.status}); keep waiting on the same thread without resubmitting. ${gate.reason}`
+  ];
+}
 async function pageStateFromProbe(probe, warnings) {
   const result = await probe;
   addWarnings(warnings, result.warnings);
@@ -6906,7 +8357,7 @@ function addWarnings(target, warnings) {
   }
 }
 async function readLatest(env, args = {}) {
-  const boot = await ensurePage3(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -6943,17 +8394,51 @@ async function readLatest(env, args = {}) {
   if (latest.actions !== void 0) data.actions = latest.actions;
   if (latest.thoughtDurationText !== void 0) data.thoughtDurationText = latest.thoughtDurationText;
   if (latest.sourcesAvailable !== void 0) data.sourcesAvailable = latest.sourcesAvailable;
+  if (role === "assistant") {
+    const generation = await readAssistantGenerationState(page).catch(() => EMPTY_GENERATION_STATE);
+    data.completionState = completionStateFromGeneration(generation, void 0, latest.text.trim().length > 0);
+    data.generationActive = generation.active;
+    data.generationSignals = generation.signals;
+  }
   return withCommandOutputText(resultOk(data, await contextFromPage(page), data.warnings ?? []));
 }
+async function messageStatus(env, args = {}) {
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  const snapshot = await readWaitDomSnapshot(page).catch(() => void 0) ?? await fallbackWaitSnapshot(page, 0);
+  const maxPreviewChars = Math.max(0, args.maxPreviewChars ?? 240);
+  const latestText = snapshot.text.length > 0 ? normalizeWhitespace(await fetchLatestAssistantText(page) ?? "") : "";
+  const data = {
+    turnCount: snapshot.turnCount,
+    assistantTurnCount: snapshot.assistantTurnCount,
+    completionState: completionStateFromGeneration(snapshot.generation, void 0, latestText.length > 0),
+    generationActive: snapshot.generation.active,
+    generationSignals: snapshot.generation.signals
+  };
+  if (snapshot.latestAssistantTurnIndex !== void 0) data.latestAssistantTurnIndex = snapshot.latestAssistantTurnIndex;
+  if (latestText.length > 0) {
+    data.latestAssistantTextLength = latestText.length;
+    data.latestAssistantPreview = latestText.length > maxPreviewChars ? `${latestText.slice(0, Math.max(0, maxPreviewChars - 1))}...` : latestText;
+  }
+  return resultOk(data, await contextFromPage(page));
+}
 async function askMessage(env, args) {
-  const boot = await ensurePage3(env);
+  const normalizedPrompt = normalizeAskPrompt(args);
+  if (!normalizedPrompt.ok) {
+    return normalizedPrompt.result;
+  }
+  const prompt = normalizedPrompt.text;
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
   const page = env.page;
   const beforeTurnCount = await countPageMessages(page).catch(() => void 0);
   const beforeAssistantTurnCount = await countPageMessages(page, "assistant").catch(() => void 0);
-  const composeArgs = { text: args.text, mode: "replace" };
+  const composeArgs = { text: prompt, mode: "replace" };
   if (args.timeoutMs !== void 0) {
     composeArgs.timeoutMs = args.timeoutMs;
   }
@@ -6961,7 +8446,7 @@ async function askMessage(env, args) {
   if (!compose.ok) {
     return forwardFailure(compose);
   }
-  const submitArgs = { text: args.text };
+  const submitArgs = { text: prompt };
   if (beforeTurnCount !== void 0) {
     submitArgs.previousTurnCount = beforeTurnCount;
   }
@@ -7019,7 +8504,7 @@ async function askMessage(env, args) {
     return forwardFailure(waitFailure);
   }
   const state = await readPageState(page).catch(() => void 0);
-  const data = { prompt: args.text };
+  const data = { prompt };
   const complete = waitResult?.data?.complete ?? (waitResult === void 0 ? void 0 : false);
   if (complete !== void 0) {
     data.complete = complete;
@@ -7033,6 +8518,7 @@ async function askMessage(env, args) {
   if (state?.title !== void 0) {
     data.title = state.title;
   }
+  applyMessageState(data, submit.data, waitResult?.data);
   if (waitFailure !== void 0) {
     data.complete = false;
     return withCommandOutputText({
@@ -7070,7 +8556,7 @@ async function waitAndRead(env, args = {}) {
     }
     return forwardFailure(read);
   }
-  const data = askReadData("", read.data?.text, wait.data?.complete);
+  const data = askReadData("", read.data?.text, wait.data?.complete, wait.data, read.data);
   const warnings = [...read.warnings, ...wait.warnings];
   if (!wait.ok && wait.status === "partial") {
     data.complete = false;
@@ -7086,12 +8572,6 @@ async function waitAndRead(env, args = {}) {
     });
   }
   return withCommandOutputText(resultOk(data, read.context, warnings));
-}
-async function ensurePage3(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
 }
 async function waitForSubmittedUserTurn(page, text, previousTurnCount, timeoutMs) {
   const started = Date.now();
@@ -7197,7 +8677,7 @@ async function sleep2(page, ms2) {
   }
   await new Promise((resolve3) => setTimeout(resolve3, ms2));
 }
-function submitData(userTurnText, turnCount) {
+function submitData(userTurnText, turnCount, submissionState, generation) {
   const data = { submitted: true };
   if (userTurnText !== void 0) {
     data.userTurnText = userTurnText;
@@ -7205,9 +8685,13 @@ function submitData(userTurnText, turnCount) {
   if (turnCount !== void 0) {
     data.turnCount = turnCount;
   }
+  data.submissionState = submissionState;
+  data.completionState = completionStateFromGeneration(generation);
+  data.generationActive = generation.active;
+  data.generationSignals = generation.signals;
   return data;
 }
-function askReadData(prompt, responseText, complete) {
+function askReadData(prompt, responseText, complete, wait, read) {
   const data = { prompt };
   if (responseText !== void 0) {
     data.responseText = responseText;
@@ -7215,7 +8699,62 @@ function askReadData(prompt, responseText, complete) {
   if (complete !== void 0) {
     data.complete = complete;
   }
+  applyMessageState(data, void 0, wait, read);
   return data;
+}
+function applyMessageState(data, submit, wait, read) {
+  if (submit?.submissionState !== void 0) data.submissionState = submit.submissionState;
+  const completionState = wait?.completionState ?? read?.completionState ?? submit?.completionState;
+  if (completionState !== void 0) data.completionState = completionState;
+  const generationActive = wait?.generationActive ?? read?.generationActive ?? submit?.generationActive;
+  if (generationActive !== void 0) data.generationActive = generationActive;
+  const generationSignals = wait?.generationSignals ?? read?.generationSignals ?? submit?.generationSignals;
+  if (generationSignals !== void 0) data.generationSignals = generationSignals;
+}
+function completionStateFromGeneration(generation, complete, hasPartialText = false) {
+  if (complete === true) return "complete";
+  if (generation.active) return "generating";
+  if (generation.stopped) return "stopped";
+  if (complete === false || hasPartialText) return "partial";
+  return "unknown";
+}
+function normalizeAskPrompt(args) {
+  const text = args.text;
+  const prompt = args.prompt;
+  if (text !== void 0 && prompt !== void 0 && text !== prompt) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        status: "error",
+        warnings: [],
+        error: {
+          name: "InvalidAskArgs",
+          message: "messages.ask received both text and prompt with different values.",
+          recoverable: false
+        },
+        context: { timestamp: (/* @__PURE__ */ new Date()).toISOString() }
+      }
+    };
+  }
+  const normalized = text ?? prompt;
+  if (normalized === void 0 || normalized.trim().length === 0) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        status: "error",
+        warnings: [],
+        error: {
+          name: "InvalidAskArgs",
+          message: "messages.ask requires a non-empty text or prompt argument.",
+          recoverable: false
+        },
+        context: { timestamp: (/* @__PURE__ */ new Date()).toISOString() }
+      }
+    };
+  }
+  return { ok: true, text: normalized };
 }
 function readRole(read) {
   return typeof read === "object" ? read.role : void 0;
@@ -7276,6 +8815,23 @@ function extractMenuItemsFromText(text) {
 async function enumerateVisibleMenuItems(page) {
   if (typeof page.evaluate === "function") {
     const labels = await page.evaluate(() => {
+      const visible = (element) => {
+        const html = element;
+        const rect = html.getBoundingClientRect?.();
+        if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+        let current = element;
+        while (current !== null) {
+          if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+            return false;
+          }
+          const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+          if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+            return false;
+          }
+          current = current.parentElement ?? null;
+        }
+        return true;
+      };
       const toItem = (node) => {
         const element = node;
         const label = (element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -7295,14 +8851,14 @@ async function enumerateVisibleMenuItems(page) {
         if (ariaLabel !== null) item.ariaLabel = ariaLabel;
         return item;
       };
-      const allRoleNodes = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']"));
-      const containers = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter((container) => typeof container.contains === "function");
+      const allRoleNodes = Array.from(document.querySelectorAll("[role='menuitem'], [role='menuitemradio'], [role='option']")).filter(visible);
+      const containers = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter((container) => visible(container) && typeof container.contains === "function");
       const scopedRoleNodes = containers.length > 0 ? allRoleNodes.filter((node) => containers.some((container) => container.contains(node))) : allRoleNodes;
       const roleItems = (scopedRoleNodes.length > 0 ? scopedRoleNodes : allRoleNodes).map(toItem).filter((item) => item.label.length > 0);
       if (roleItems.length > 0) {
         return { items: roleItems, labels: [], split: false };
       }
-      const menus = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).map((node) => node.innerText ?? node.textContent ?? "").filter(Boolean);
+      const menus = Array.from(document.querySelectorAll("[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper]")).filter(visible).map((node) => node.innerText ?? node.textContent ?? "").filter(Boolean);
       return { items: [], labels: menus, split: true };
     });
     return labels.split ? labels.labels.flatMap((label) => extractMenuItemsFromText(label)) : labels.items.map((item) => ({ ...item, label: normalizeWhitespace(item.label), normalized: normalizeLabel(item.label) })).filter((item) => item.label.length > 0);
@@ -7323,7 +8879,8 @@ function findUniqueMenuItem(items, wanted) {
 var DEFAULT_MODE_EFFORT = "Thinking";
 var CURRENT_MODE_LABELS = dedupeLabels([
   ...localeLabels.modeLabels,
-  ...Object.values(localeLabels.modeOptions).flat()
+  ...Object.values(localeLabels.modeOptions).flat(),
+  ...Object.values(localeLabels.configurationOptions).flat()
 ]);
 var MODE_OPENER_LABELS = [...CURRENT_MODE_LABELS.filter((label) => label !== "Pro"), ...localeLabels.modeOpenerExtra];
 var MODEL_VERSION_FAMILY_PATTERN = /^gpt[\s-]/i;
@@ -7358,7 +8915,7 @@ var MODE_ID_ALIASES = {
 var THREAD_ACTION_MENU_LABELS = new Set(localeLabels.threadActionMenuItems.map(normalizeForLabelMatch));
 var THREAD_ACTION_PREFIXES = localeLabels.threadActionPrefixes.map(normalizeForLabelMatch).filter((prefix) => prefix.length > 0);
 async function setMode(env, args) {
-  const boot = await ensurePage4(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -7462,7 +9019,7 @@ function isImplicitSolHighVerification(request, requested, selected, visibleButt
 }
 async function getMode(env, args = {}) {
   void args;
-  const boot = await ensurePage4(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -7499,7 +9056,7 @@ async function waitForModeMenu(page, requested, timeoutMs) {
   return { opened: false, alreadySelected: [], modeButtons };
 }
 async function selectTool(env, args) {
-  const boot = await ensurePage4(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -7539,12 +9096,6 @@ async function selectTool(env, args) {
   } catch (error) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
-}
-async function ensurePage4(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
 }
 async function clickFirstUniqueButton(page, labels) {
   for (const label of labels) {
@@ -7795,17 +9346,33 @@ async function selectModelVersion(page, requestedVersion, currentCandidates, tim
       candidates = await enumerateVisibleMenuItems(page);
     }
   }
-  let exact = findExactMenuItem(candidates, requestedVersion);
+  let exact = findExactSelectableMenuItem(candidates, requestedVersion);
   if (exact !== void 0) {
-    return await clickMenuItem(page, exact.label) ? { selected: exact.label, candidates: candidates.map((candidate) => candidate.label) } : { candidates: candidates.map((candidate) => candidate.label) };
+    return await clickResolvedMenuItem(page, exact) ? { selected: exact.label, candidates: candidates.map((candidate) => candidate.label) } : { candidates: candidates.map((candidate) => candidate.label) };
   }
   const opened = await openModelVersionSubmenu(page, currentCandidates);
   candidates = await enumerateVisibleMenuItems(page);
-  exact = findExactMenuItem(candidates, requestedVersion);
+  exact = findExactSelectableMenuItem(candidates, requestedVersion);
   if (!opened || exact === void 0) {
     return { candidates: candidates.map((candidate) => candidate.label) };
   }
-  return await clickMenuItem(page, exact.label) ? { selected: exact.label, candidates: candidates.map((candidate) => candidate.label) } : { candidates: candidates.map((candidate) => candidate.label) };
+  return await clickResolvedMenuItem(page, exact) ? { selected: exact.label, candidates: candidates.map((candidate) => candidate.label) } : { candidates: candidates.map((candidate) => candidate.label) };
+}
+function isModelVersionSubmenuOpener(item) {
+  return item.hasPopup === true || item.role !== "menuitemradio" && MODEL_VERSION_FAMILY_PATTERN.test(item.label);
+}
+async function clickResolvedMenuItem(page, item) {
+  if (item.testId !== void 0 && await clickIfUnique(
+    page.locator?.(`[data-testid="${escapeAttributeValue(item.testId)}"]`)
+  )) {
+    return true;
+  }
+  if (item.role !== void 0 && await clickIfUnique(
+    page.getByRole?.(item.role, { name: item.label, exact: true })
+  )) {
+    return true;
+  }
+  return clickMenuItem(page, item.label);
 }
 async function openModelVersionSubmenu(page, candidates) {
   const submenuOpeners = candidates.filter((item) => item.hasPopup === true || MODEL_VERSION_FAMILY_PATTERN.test(item.label));
@@ -7880,9 +9447,11 @@ async function menuItemCenter(page, item, roles = ["menuitem", "menuitemradio", 
 async function modelVersionMenuItemsAreVisible(page) {
   return (await enumerateVisibleMenuItems(page)).some((candidate) => candidate.role === "menuitemradio" && MODEL_VERSION_LABEL_PATTERN.test(candidate.label));
 }
-function findExactMenuItem(items, wanted) {
+function findExactSelectableMenuItem(items, wanted) {
   const normalized = normalizeLabel(wanted);
-  const matches = items.filter((item) => item.normalized === normalized);
+  const matches = items.filter(
+    (item) => item.normalized === normalized && !isModelVersionSubmenuOpener(item)
+  );
   return matches.length === 1 ? matches[0] : void 0;
 }
 function dedupeLabels(labels) {
@@ -7938,8 +9507,12 @@ async function visibleModeButtonLabelList(page) {
       }
       return text.includes(token);
     };
+    const scopedRoots = Array.from(document.querySelectorAll(
+      "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+    ));
     return Array.from(document.querySelectorAll("button, [role='button']")).map((node) => {
       const element = node;
+      if (scopedRoots.length > 0 && !scopedRoots.some((root) => root.contains(node))) return "";
       const visibleText = (element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
       const ariaLabel = (element.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
       const label = visibleText.length > 0 ? visibleText : ariaLabel;
@@ -7948,10 +9521,1203 @@ async function visibleModeButtonLabelList(page) {
       if (/open profile menu/i.test(label)) return "";
       if (visibleText.length === 0 && /feedback|conversation options|dismiss/i.test(ariaLabel)) return "";
       const normalized = label.toLowerCase();
-      if (!normalizedModeLabels.some((modeLabel) => tokenMatches(normalized, modeLabel))) return "";
+      const structuralModelControl = /model-switcher|model-selector|mode-selector/i.test(testId) || /\b(?:gpt|sol|luna|terra)\b/i.test(label);
+      if (!structuralModelControl && !normalizedModeLabels.some((modeLabel) => tokenMatches(normalized, modeLabel))) return "";
       return label;
     }).filter(Boolean).slice(0, 30);
   }, CURRENT_MODE_LABELS).then((labels) => labels.map(normalizeWhitespace)).catch(() => []);
+}
+
+// src/commands/experience.ts
+var CHATGPT_HOME2 = "https://chatgpt.com/";
+var EXPERIENCE_CONTROL_DISCOVERY_TIMEOUT_MS = 15e3;
+var EXPERIENCE_POLL_MS = 250;
+async function detectExperience(env, args = {}) {
+  void args;
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  try {
+    const data = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+    return resultOk(data, await contextFromPage(page, {
+      experience: data.experience,
+      selectorProfile: data.selectorProfile
+    }), data.experience === "unknown" ? ["The current ChatGPT surface could not be classified as Chat or Work from scoped composer evidence."] : []);
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+async function openExperience(env, args) {
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  try {
+    const before = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+    if (before.experience === args.experience) {
+      return resultOk({
+        experience: args.experience,
+        previousExperience: before.experience,
+        changed: false,
+        selectorProfile: before.selectorProfile
+      }, await contextFromPage(page, {
+        experience: before.experience,
+        selectorProfile: before.selectorProfile
+      }));
+    }
+    const labels = localeLabels.experienceOptions[args.experience];
+    const timeoutMs = args.timeoutMs ?? 3e4;
+    const discoveryAttempts = pollAttempts(
+      Math.min(timeoutMs, EXPERIENCE_CONTROL_DISCOVERY_TIMEOUT_MS),
+      EXPERIENCE_POLL_MS
+    );
+    let observed = before;
+    let controlClicked = await clickUniqueExperienceControl(page, labels);
+    if (!controlClicked && await navigateConversationToSurfaceHome(page, args.timeoutMs)) {
+      observed = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+      if (observed.experience === args.experience) {
+        return resultOk({
+          experience: args.experience,
+          previousExperience: before.experience,
+          changed: true,
+          selectorProfile: observed.selectorProfile
+        }, await contextFromPage(page, {
+          experience: observed.experience,
+          selectorProfile: observed.selectorProfile
+        }));
+      }
+      controlClicked = await clickUniqueExperienceControl(page, labels);
+    }
+    for (let attempt = 1; !controlClicked && attempt < discoveryAttempts; attempt += 1) {
+      await page.waitForTimeout?.(EXPERIENCE_POLL_MS);
+      observed = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+      if (observed.experience === args.experience) {
+        return resultOk({
+          experience: args.experience,
+          previousExperience: before.experience,
+          changed: true,
+          selectorProfile: observed.selectorProfile
+        }, await contextFromPage(page, {
+          experience: observed.experience,
+          selectorProfile: observed.selectorProfile
+        }));
+      }
+      controlClicked = await clickUniqueExperienceControl(page, labels);
+    }
+    if (!controlClicked) {
+      return experienceSelectorDrift(
+        page,
+        `No unique visible ChatGPT ${args.experience === "work" ? "Work" : "Chat"} surface control was found.`,
+        observed
+      );
+    }
+    let after = before;
+    for (let attempt = 0; attempt < pollAttempts(timeoutMs, EXPERIENCE_POLL_MS); attempt += 1) {
+      await page.waitForTimeout?.(EXPERIENCE_POLL_MS);
+      after = detectExperienceFromSnapshot(await readSurfaceSnapshot(page));
+      if (after.experience === args.experience) {
+        return resultOk({
+          experience: args.experience,
+          previousExperience: before.experience,
+          changed: true,
+          selectorProfile: after.selectorProfile
+        }, await contextFromPage(page, {
+          experience: after.experience,
+          selectorProfile: after.selectorProfile
+        }));
+      }
+    }
+    return {
+      ok: false,
+      status: "blocked",
+      warnings: [],
+      blocker: {
+        kind: "selector_drift",
+        code: "experience_postcondition_unverified",
+        fieldPath: "experience",
+        message: `The ${args.experience} surface control was clicked, but the composer did not verify that ChatGPT switched to ${args.experience}.`,
+        candidates: labels.map((label) => ({ label })),
+        resumable: true
+      },
+      context: await contextFromPage(page, {
+        experience: after.experience,
+        selectorProfile: after.selectorProfile
+      })
+    };
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+function pollAttempts(timeoutMs, pollMs) {
+  return Math.max(1, Math.ceil(Math.max(0, timeoutMs) / pollMs));
+}
+async function navigateConversationToSurfaceHome(page, timeoutMs) {
+  if (page.goto === void 0 || page.url === void 0) return false;
+  const currentUrl = await Promise.resolve(page.url()).catch(() => "");
+  if (!/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) return false;
+  await page.goto(CHATGPT_HOME2, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs ?? 3e4
+  });
+  await page.waitForTimeout?.(500);
+  return true;
+}
+function detectExperienceFromSnapshot(snapshot) {
+  const evidence = [];
+  const composerLabels = snapshot.composerLabels.map(normalizeForLabelMatch);
+  const controls = snapshot.mainControls.map(normalizeForLabelMatch);
+  const mainText = normalizeForLabelMatch(snapshot.mainText);
+  const selectedSurfaceLabels = (snapshot.selectedSurfaceLabels ?? []).map(normalizeForLabelMatch);
+  const url = snapshot.url.toLowerCase();
+  const selectedWork = matchingLabels(selectedSurfaceLabels, localeLabels.experienceOptions.work);
+  const selectedChat = matchingLabels(selectedSurfaceLabels, localeLabels.experienceOptions.chat);
+  const workSurfaceSelected = selectedWork.length > 0 && selectedChat.length === 0;
+  const chatSurfaceSelected = selectedChat.length > 0 && selectedWork.length === 0;
+  if (workSurfaceSelected) {
+    evidence.push({ source: "control", label: "Work surface selected" });
+  } else if (chatSurfaceSelected) {
+    evidence.push({ source: "control", label: "Chat surface selected" });
+  }
+  const workComposer = matchingLabels(composerLabels, localeLabels.workComposerTextbox);
+  for (const label of workComposer) {
+    evidence.push({ source: "composer", label });
+  }
+  const chatComposer = matchingLabels(composerLabels, localeLabels.composerTextbox);
+  for (const label of chatComposer) {
+    evidence.push({ source: "composer", label });
+  }
+  const workAxisCount = ["model", "effort", "speed"].filter((axis) => hasAnyLabel(controls, localeLabels.configurationAxes[axis])).length;
+  if (workAxisCount >= 2) {
+    evidence.push({ source: "control", label: `Work configuration axes (${workAxisCount}/3)` });
+  }
+  const workConfigurationOpener = controls.some(
+    (label) => /\b(?:gpt[\s-]?\d|\d+(?:\.\d+)+|sol|luna|terra)\b/i.test(label) && hasAnyLabel([label], [
+      ...localeLabels.configurationOptions.light,
+      ...localeLabels.configurationOptions.medium,
+      ...localeLabels.configurationOptions.high,
+      ...localeLabels.configurationOptions.extraHigh,
+      ...localeLabels.configurationOptions.max,
+      ...localeLabels.configurationOptions.ultra
+    ])
+  );
+  if (workConfigurationOpener) {
+    evidence.push({ source: "control", label: "Work configuration opener" });
+  }
+  if (/\/work(?:\/|$|\?)/.test(url)) {
+    evidence.push({ source: "url", label: snapshot.url });
+  }
+  if (containsAny(mainText, ["work on something else", "work on anything"])) {
+    evidence.push({ source: "heading", label: "Work composer copy" });
+  }
+  const workScore = workComposer.length * 4 + (workSurfaceSelected ? 10 : 0) + (workAxisCount >= 2 ? 4 : 0) + (workConfigurationOpener ? 6 : 0) + (/\/work(?:\/|$|\?)/.test(url) ? 3 : 0) + (containsAny(mainText, ["work on something else", "work on anything"]) ? 2 : 0);
+  const chatScore = chatComposer.length * 4 + (chatSurfaceSelected ? 10 : 0);
+  let experience = "unknown";
+  let confidence = "low";
+  if (workScore > chatScore && workScore >= 4) {
+    experience = "work";
+    confidence = workSurfaceSelected || workScore >= 7 ? "high" : "medium";
+  } else if (chatScore > workScore && chatScore >= 4) {
+    experience = "chat";
+    confidence = "high";
+  }
+  const selectorProfile = profileFromSnapshot(snapshot, experience);
+  return { experience, selectorProfile, confidence, evidence };
+}
+async function readSurfaceSnapshot(page) {
+  const url = typeof page.url === "function" ? await Promise.resolve(page.url()).catch(() => "") : "";
+  if (typeof page.evaluate !== "function") {
+    return { url, composerLabels: [], mainControls: [], mainText: "", selectedSurfaceLabels: [] };
+  }
+  const snapshot = await page.evaluate((surfaceOptionLabels) => {
+    const visible = (element) => {
+      const html = element;
+      const rect = html.getBoundingClientRect?.();
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
+    };
+    const labelFor = (element) => {
+      const html = element;
+      return element.getAttribute("aria-label") ?? element.getAttribute("placeholder") ?? html.innerText ?? element.textContent ?? "";
+    };
+    const normalize = (value) => value.replace(/\s+/g, " ").trim();
+    const normalizeComparable = (value) => normalize(value).toLocaleLowerCase();
+    const wantedSurfaceLabels = new Set(surfaceOptionLabels.map(normalizeComparable));
+    const composerRoots = Array.from(document.querySelectorAll(
+      "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+    ));
+    const composerNodes = composerRoots.flatMap((root) => [
+      root,
+      ...Array.from(root.querySelectorAll("textarea, [contenteditable='true'], [role='textbox'], input"))
+    ]);
+    const composerLabels = Array.from(new Set(composerNodes.filter(visible).map(labelFor).map(normalize).filter(Boolean))).slice(0, 16);
+    const main = document.querySelector("main");
+    const overlayRoots = Array.from(document.querySelectorAll(
+      "[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper], [data-radix-menu-content]"
+    )).filter(visible);
+    const controlRoots = Array.from(/* @__PURE__ */ new Set([...composerRoots, ...overlayRoots]));
+    const effectiveControlRoots = controlRoots.length > 0 ? controlRoots : main === null ? [] : [main];
+    const mainControls = Array.from(new Set(effectiveControlRoots.flatMap((root) => Array.from(root.querySelectorAll(
+      "button, [role='button'], [role='menuitem'], [role='menuitemradio'], [role='option']"
+    ))).filter(visible).map(labelFor).map(normalize).filter(Boolean))).slice(0, 120);
+    const surfaceTextNodes = main === null ? [] : Array.from(main.querySelectorAll(
+      "h1, h2, h3, form, [data-testid*='composer' i], [class*='composer' i]"
+    )).filter(visible).slice(0, 32);
+    const mainText = normalize(surfaceTextNodes.map(labelFor).join(" ")).slice(0, 2e3);
+    const selectedSurfaceLabels = Array.from(new Set(Array.from(document.querySelectorAll(
+      "[role='radio'][aria-checked='true'], [role='radio'][data-state='checked'], input[type='radio']:checked"
+    )).filter(visible).map(labelFor).map(normalize).filter((label) => wantedSurfaceLabels.has(normalizeComparable(label))))).slice(0, 4);
+    return { composerLabels, mainControls, mainText, selectedSurfaceLabels };
+  }, [
+    ...localeLabels.experienceOptions.chat,
+    ...localeLabels.experienceOptions.work
+  ]).catch(() => ({ composerLabels: [], mainControls: [], mainText: "", selectedSurfaceLabels: [] }));
+  return { url, ...snapshot };
+}
+function profileFromSnapshot(snapshot, experience) {
+  const controls = snapshot.mainControls.map(normalizeForLabelMatch);
+  const mainText = normalizeForLabelMatch(snapshot.mainText);
+  if (experience === "work") {
+    return hasAnyLabel(controls, localeLabels.configurationAxes.advanced) || containsAny(mainText, localeLabels.configurationAxes.advanced) ? "work_advanced_v1" : "work_basic_v1";
+  }
+  if (experience !== "chat") {
+    return "unknown";
+  }
+  const simplifiedOptions = [
+    ...localeLabels.configurationOptions.instant,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.extraHigh,
+    ...localeLabels.configurationOptions.pro
+  ];
+  if (hasAnyLabel(controls, simplifiedOptions)) {
+    return "chat_simplified_v1";
+  }
+  const legacyOptions = [
+    ...localeLabels.modeOptions.latest,
+    ...localeLabels.modeOptions.thinking,
+    ...localeLabels.modeOptions.extended
+  ];
+  return hasAnyLabel(controls, legacyOptions) ? "chat_legacy_v1" : "chat_simplified_v1";
+}
+async function clickUniqueExperienceControl(page, labels) {
+  for (const label of labels) {
+    for (const role of ["radio", "button", "menuitem", "tab", "link"]) {
+      if (await clickIfUnique2(page.getByRole?.(role, { name: label, exact: true }))) {
+        return true;
+      }
+    }
+  }
+  if (typeof page.evaluate !== "function") {
+    return false;
+  }
+  return page.evaluate((wantedLabels) => {
+    const normalize = (value) => value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    const wanted = new Set(wantedLabels.map(normalize));
+    const visible = (element) => {
+      const html = element;
+      const rect = html.getBoundingClientRect?.();
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
+    };
+    const labelFor = (node) => {
+      const html = node;
+      const inputLabels = "labels" in node ? Array.from(node.labels ?? []).map((label) => label.innerText).join(" ") : "";
+      return node.getAttribute("aria-label") || inputLabels || html.innerText || node.textContent || "";
+    };
+    const nodes = Array.from(document.querySelectorAll(
+      "[role='radio'], input[type='radio'], header button, header [role='button'], header [role='tab'], main [role='menuitem'], main [role='option']"
+    ));
+    const matches = nodes.filter((node) => visible(node) && wanted.has(normalize(labelFor(node))));
+    if (matches.length !== 1) return false;
+    matches[0].click();
+    return true;
+  }, labels).catch(() => false);
+}
+async function clickIfUnique2(locator) {
+  if (locator?.count === void 0 || locator.click === void 0) {
+    return false;
+  }
+  if (await locator.count().catch(() => 0) !== 1) {
+    return false;
+  }
+  await locator.click();
+  return true;
+}
+function matchingLabels(normalizedHaystack, candidates) {
+  const normalizedCandidates = candidates.map(normalizeForLabelMatch);
+  return normalizedHaystack.filter((label) => normalizedCandidates.some(
+    (candidate) => label === candidate || visibleLabelMatches(label, candidate)
+  )).slice(0, 4);
+}
+function hasAnyLabel(normalizedHaystack, candidates) {
+  const normalizedCandidates = candidates.map(normalizeForLabelMatch);
+  return normalizedHaystack.some(
+    (label) => normalizedCandidates.some(
+      (candidate) => label === candidate || visibleLabelMatches(label, candidate)
+    )
+  );
+}
+function containsAny(normalizedText, candidates) {
+  return candidates.map(normalizeForLabelMatch).some((candidate) => normalizedText.includes(candidate));
+}
+async function experienceSelectorDrift(page, message, detected) {
+  return {
+    ok: false,
+    status: "unsupported",
+    warnings: [],
+    blocker: {
+      kind: "selector_drift",
+      code: "experience_control_not_found",
+      fieldPath: "experience",
+      message,
+      candidates: detected.evidence.map((item) => ({ label: `${item.source}: ${item.label}` })),
+      resumable: true
+    },
+    context: await contextFromPage(page, {
+      experience: detected.experience,
+      selectorProfile: detected.selectorProfile
+    })
+  };
+}
+
+// src/commands/configuration.ts
+var WORK_AXES = ["model", "effort", "speed"];
+var CONFIGURATION_CONTROL_DISCOVERY_TIMEOUT_MS = 5e3;
+var CONFIGURATION_CONTROL_POLL_MS = 250;
+var CONFIGURATION_AXIS_ORDER = [
+  "model",
+  "intelligence",
+  "effort",
+  "speed",
+  "modelVersion"
+];
+async function inspectConfiguration(env, args = {}) {
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  try {
+    const detected = await detectExperience(
+      env,
+      args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    );
+    if (!detected.ok || detected.data === void 0) {
+      return forwardFailure2(detected);
+    }
+    if (args.experience !== void 0 && detected.data.experience !== args.experience) {
+      return {
+        ok: false,
+        status: "unsupported",
+        warnings: [],
+        blocker: {
+          kind: "selector_drift",
+          code: "experience_mismatch",
+          fieldPath: "experience",
+          message: `Configuration inspection expected ${args.experience}, but the visible composer is ${detected.data.experience}. Call experience.open first or omit the expected experience.`,
+          resumable: true
+        },
+        context: await contextFromPage(page, {
+          experience: detected.data.experience,
+          selectorProfile: detected.data.selectorProfile
+        })
+      };
+    }
+    const experience = detected.data.experience;
+    const rootOpened = experience !== "unknown" && await waitForConfigurationRoot(
+      page,
+      experience,
+      args.timeoutMs
+    );
+    if (rootOpened) {
+      await page.waitForTimeout?.(150);
+    }
+    const workAdvancedOpened = experience !== "work" || rootOpened && await ensureWorkAdvancedPanel(page);
+    if (experience === "work" && workAdvancedOpened) {
+      await page.waitForTimeout?.(150);
+    }
+    const panel = await readConfigurationPanel(page);
+    const rootItems = rootOpened ? await enumerateVisibleMenuItems(page) : [];
+    const data = configurationInspectionFromSurface(
+      experience,
+      detected.data.selectorProfile,
+      detected.data.evidence,
+      panel,
+      rootItems
+    );
+    if (args.includeOptions !== false && experience === "work" && panel.axisRows.length > 0) {
+      for (const axis of WORK_AXES) {
+        if (!data.availableAxes.includes(axis)) continue;
+        const options = await inspectWorkAxisOptions(env, axis);
+        if (options.length > 0) {
+          data.options[axis] = options;
+        }
+      }
+      await closeConfigurationMenus(page);
+    }
+    const warnings = [];
+    if (!rootOpened) {
+      warnings.push("No scoped configuration opener was available; inspection is limited to controls already visible in the composer.");
+    }
+    if (experience === "work" && rootOpened && !workAdvancedOpened) {
+      warnings.push("The Work configuration menu opened, but its Advanced model, effort, and speed controls could not be made visible.");
+    }
+    if (!data.verified) {
+      warnings.push("The visible configuration could not be verified from a recognized Chat or Work selector profile.");
+    }
+    return resultOk(data, await contextFromPage(page, {
+      experience: data.experience,
+      selectorProfile: data.selectorProfile
+    }), warnings);
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+async function waitForConfigurationRoot(page, experience, timeoutMs) {
+  const discoveryMs = Math.min(
+    timeoutMs ?? CONFIGURATION_CONTROL_DISCOVERY_TIMEOUT_MS,
+    CONFIGURATION_CONTROL_DISCOVERY_TIMEOUT_MS
+  );
+  const attempts = Math.max(1, Math.ceil(Math.max(0, discoveryMs) / CONFIGURATION_CONTROL_POLL_MS));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await openConfigurationRoot(page, experience)) return true;
+    if (attempt + 1 < attempts) {
+      await page.waitForTimeout?.(CONFIGURATION_CONTROL_POLL_MS);
+    }
+  }
+  return false;
+}
+async function applyConfiguration(env, args) {
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  const strict = args.strict ?? true;
+  try {
+    const desired = normalizeDesiredSelection(args.desired);
+    if (selectionEntries(desired).length === 0) {
+      return {
+        ok: false,
+        status: "unsupported",
+        warnings: [],
+        blocker: {
+          kind: "selector_drift",
+          code: "configuration_empty",
+          fieldPath: "desired",
+          message: "configuration.apply requires at least one desired model, intelligence, effort, speed, or modelVersion value.",
+          resumable: false
+        },
+        context: await contextFromPage(page)
+      };
+    }
+    if (args.experience !== void 0) {
+      const opened = await openExperience(env, {
+        experience: args.experience,
+        ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+      });
+      if (!opened.ok) {
+        return forwardFailure2(opened);
+      }
+    }
+    const beforeResult = await inspectConfiguration(env, {
+      ...args.experience === void 0 ? {} : { experience: args.experience },
+      includeOptions: true,
+      ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    });
+    if (!beforeResult.ok || beforeResult.data === void 0) {
+      return forwardFailure2(beforeResult);
+    }
+    const before = beforeResult.data;
+    if (before.experience === "unknown") {
+      return configurationFailure(page, before, desired, [], "The visible surface is not recognizable as Chat or Work.", "experience_unknown");
+    }
+    const selected = [];
+    for (const [axis, requested] of selectionEntries(desired)) {
+      const active = activeConfigurationValue(before, axis);
+      if (active !== void 0 && configurationValueMatches(active, requested)) {
+        selected.push({ axis, requested, selected: active });
+        continue;
+      }
+      const selection = before.experience === "work" ? await selectWorkAxis(env, axis, requested) : await selectChatAxis(env, axis, requested, args.timeoutMs);
+      if (selection === void 0) {
+        return configurationFailure(
+          page,
+          before,
+          desired,
+          selected,
+          `Configuration option "${requested}" for ${axis} was not found or was ambiguous on the ${before.experience} surface.`,
+          "configuration_option_not_found",
+          before.options[axis]?.map((option) => option.label)
+        );
+      }
+      selected.push({ axis, requested, selected: selection });
+    }
+    const afterResult = await inspectConfiguration(env, {
+      ...args.experience === void 0 ? {} : { experience: args.experience },
+      includeOptions: false,
+      ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    });
+    if (!afterResult.ok || afterResult.data === void 0) {
+      return forwardFailure2(afterResult);
+    }
+    const after = afterResult.data;
+    const verified = configurationMatchesSelection(after, desired);
+    const data = { requested: desired, selected, before, after, verified };
+    if (!verified && strict) {
+      return {
+        ok: false,
+        status: "blocked",
+        data,
+        warnings: [],
+        blocker: {
+          kind: "selector_drift",
+          code: "configuration_postcondition_unverified",
+          fieldPath: "desired",
+          message: `ChatGPT accepted configuration clicks, but the visible ${after.experience} controls do not verify every requested value.`,
+          candidates: Object.entries(after.active).map(([axis, label]) => ({ label: `${axis}: ${label}` })),
+          resumable: true
+        },
+        context: await contextFromPage(page, {
+          experience: after.experience,
+          selectorProfile: after.selectorProfile
+        })
+      };
+    }
+    const warnings = verified ? [] : ["Configuration clicks completed, but strict verification was disabled and the visible postcondition remains unverified."];
+    return resultOk(data, await contextFromPage(page, {
+      experience: after.experience,
+      selectorProfile: after.selectorProfile
+    }), warnings);
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
+  }
+}
+function configurationInspectionFromSurface(experience, detectedProfile, evidence, panel, menuItems) {
+  const active = {};
+  const options = {};
+  const availableAxes = [];
+  let selectorProfile = detectedProfile;
+  if (experience === "work") {
+    for (const row of panel.axisRows) {
+      if (!availableAxes.includes(row.axis)) availableAxes.push(row.axis);
+      if (row.value !== void 0 && row.value.length > 0) active[row.axis] = row.value;
+    }
+    selectorProfile = panel.advancedVisible ? "work_advanced_v1" : "work_basic_v1";
+  } else if (experience === "chat") {
+    const simplified = chatMenuLooksSimplified(menuItems);
+    selectorProfile = simplified ? "chat_simplified_v1" : detectedProfile;
+    const axis = simplified ? "intelligence" : "effort";
+    if (menuItems.length > 0 || panel.openerLabel !== void 0) {
+      availableAxes.push(axis);
+    }
+    if (panel.openerLabel !== void 0) {
+      active[axis] = panel.openerLabel;
+    }
+    const chatOptions = menuItems.filter((item) => !isConfigurationAxisRow(item.label)).map(menuItemToOption);
+    if (chatOptions.length > 0) {
+      options[axis] = chatOptions;
+    }
+    const modelRows = menuItems.filter((item) => /^gpt[\s-]/i.test(item.label) || item.hasPopup === true);
+    if (modelRows.length > 0) {
+      availableAxes.push("modelVersion");
+      options.modelVersion = modelRows.map(menuItemToOption);
+    }
+  }
+  return {
+    experience,
+    selectorProfile,
+    availableAxes,
+    active,
+    options,
+    verified: experience !== "unknown" && (availableAxes.length > 0 || Object.keys(active).length > 0),
+    evidence
+  };
+}
+async function inspectWorkAxisOptions(env, axis) {
+  const page = env.page;
+  const options = (await openWorkAxisOptions(env, axis)).map(menuItemToOption);
+  await closeConfigurationSubmenu(page);
+  return dedupeOptions(options);
+}
+async function selectWorkAxis(env, axis, requested) {
+  const page = env.page;
+  if (!WORK_AXES.includes(axis)) {
+    return void 0;
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const candidates = await openWorkAxisOptions(env, axis);
+    const match = findConfigurationOption(candidates, requested);
+    if (match !== void 0 && await clickVisibleMenuItem(page, match)) {
+      await page.waitForTimeout?.(150);
+      return match.label;
+    }
+    if (attempt === 0) {
+      await closeConfigurationMenus(page);
+      await page.waitForTimeout?.(200);
+    }
+  }
+  return void 0;
+}
+async function openWorkAxisOptions(env, axis, allowRootRetry = true) {
+  const page = env.page;
+  if (!await ensureWorkAdvancedPanel(page)) return [];
+  const row = await findWorkAxisRow(page, axis);
+  if (row === void 0) return [];
+  const visibleOptions = async () => filterWorkAxisOptions(await enumerateVisibleMenuItems(page), axis);
+  const alreadyOpen = await visibleOptions();
+  if (alreadyOpen.length > 0) return alreadyOpen;
+  const point = await locatorCenter(row);
+  if (point !== void 0 && await movePointerWithCdp(env, point)) {
+    await page.waitForTimeout?.(180);
+    const hoveredOptions = await visibleOptions();
+    if (hoveredOptions.length > 0) return hoveredOptions;
+    await movePointerWithCdp(env, { x: point.x - 2, y: point.y });
+    await movePointerWithCdp(env, point);
+    await page.waitForTimeout?.(180);
+    const retriedOptions = await visibleOptions();
+    if (retriedOptions.length > 0) return retriedOptions;
+  }
+  if (point !== void 0 && page.mouse?.move !== void 0) {
+    try {
+      await page.mouse.move(point.x, point.y);
+    } catch {
+    }
+    await page.waitForTimeout?.(180);
+    const mouseOptions = await visibleOptions();
+    if (mouseOptions.length > 0) return mouseOptions;
+  }
+  if (point !== void 0 && typeof page.cua?.move === "function") {
+    try {
+      await page.cua.move(point);
+    } catch {
+    }
+    await page.waitForTimeout?.(180);
+    const movedOptions = await visibleOptions();
+    if (movedOptions.length > 0) return movedOptions;
+  }
+  if (row.click !== void 0) {
+    await row.click().catch(() => void 0);
+    await page.waitForTimeout?.(180);
+  }
+  const clickedOptions = await visibleOptions();
+  if (clickedOptions.length > 0 || !allowRootRetry) return clickedOptions;
+  await closeConfigurationMenus(page);
+  await page.waitForTimeout?.(200);
+  return openWorkAxisOptions(env, axis, false);
+}
+async function locatorCenter(locator) {
+  if (locator.evaluate === void 0) return void 0;
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2)
+    };
+  }).catch(() => void 0);
+}
+async function movePointerWithCdp(env, point) {
+  const page = env.page;
+  const tabId = page === void 0 ? void 0 : tabIdFromPage(page);
+  if (tabId === void 0 || env.browser?.tabs?.get === void 0) return false;
+  try {
+    const tab = await env.browser.tabs.get(tabId);
+    const capability2 = await tab.capabilities?.get?.("cdp");
+    if (capability2?.send === void 0) return false;
+    await capability2.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      button: "none",
+      buttons: 0,
+      pointerType: "mouse"
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function filterWorkAxisOptions(items, axis) {
+  return items.filter((item) => {
+    if (isConfigurationAxisRow(item.label)) return false;
+    return workAxisOptionLabelMatches(axis, item.label);
+  });
+}
+function workAxisOptionLabelMatches(axis, label) {
+  if (axis === "model") {
+    return /\b(?:gpt[\s-]?\d|sol|luna|terra)\b/i.test(label);
+  }
+  const candidates = axis === "effort" ? [
+    ...localeLabels.configurationOptions.light,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.extraHigh,
+    ...localeLabels.configurationOptions.max,
+    ...localeLabels.configurationOptions.ultra
+  ] : axis === "speed" ? [
+    ...localeLabels.configurationOptions.standard,
+    ...localeLabels.configurationOptions.fast
+  ] : [];
+  return candidates.some((candidate) => visibleLabelMatches(label, candidate));
+}
+async function selectChatAxis(env, axis, requested, timeoutMs) {
+  const legacyArgs = axis === "modelVersion" ? { modelVersion: requested } : axis === "intelligence" ? { intelligence: requested } : axis === "effort" ? { effort: requested } : axis === "model" ? { model: requested } : void 0;
+  if (legacyArgs === void 0) {
+    return void 0;
+  }
+  const result = await setMode(env, {
+    ...legacyArgs,
+    ...timeoutMs === void 0 ? {} : { timeoutMs }
+  });
+  return result.ok ? result.data?.selected.at(-1) : void 0;
+}
+async function openConfigurationRoot(page, experience) {
+  const existing = await readConfigurationPanel(page);
+  if (existing.axisRows.length > 0) {
+    return true;
+  }
+  const existingItems = await enumerateVisibleMenuItems(page).catch(() => []);
+  if (configurationMenuLooksRecognized(existingItems, experience, existing.openerLabel)) {
+    return true;
+  }
+  if (existing.openerLabel !== void 0 && await clickIfUnique3(page.getByRole?.("button", { name: existing.openerLabel, exact: true }))) {
+    return true;
+  }
+  if (typeof page.evaluate === "function") {
+    const clicked = await page.evaluate((surface) => {
+      const normalize = (value) => value.replace(/\s+/g, " ").trim();
+      const visible = (element) => {
+        const html = element;
+        const rect = html.getBoundingClientRect?.();
+        if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+        let current = element;
+        while (current !== null) {
+          if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+            return false;
+          }
+          const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+          if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+            return false;
+          }
+          current = current.parentElement ?? null;
+        }
+        return true;
+      };
+      const composerRoots = Array.from(document.querySelectorAll(
+        "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+      ));
+      const main = document.querySelector("main");
+      const roots = Array.from(/* @__PURE__ */ new Set([
+        ...composerRoots,
+        ...main === null ? [] : [main]
+      ]));
+      const controls = Array.from(new Set(roots.flatMap(
+        (root) => Array.from(root.querySelectorAll("button, [role='button']"))
+      ))).filter(visible);
+      const matches = controls.filter((control) => {
+        const html = control;
+        const label = normalize(control.getAttribute("aria-label") ?? html.innerText ?? control.textContent ?? "");
+        const testId = control.getAttribute("data-testid") ?? "";
+        if (/send|voice|microphone|attach|upload|add files|plus/i.test(`${label} ${testId}`)) return false;
+        if (/model-switcher|model-selector|mode-selector/i.test(testId)) return true;
+        return surface === "work" ? /\b(?:gpt|sol|luna|terra|light|medium|high|max|ultra|standard|fast)\b/i.test(label) : /\b(?:instant|medium|high|extra high|pro|thinking|extended|gpt)\b/i.test(label);
+      });
+      if (matches.length !== 1) return false;
+      matches[0].click();
+      return true;
+    }, experience).catch(() => false);
+    if (clicked) return true;
+  }
+  const labels = experience === "work" ? [
+    ...localeLabels.configurationOptions.light,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.standard
+  ] : [
+    ...localeLabels.configurationOptions.instant,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.extraHigh,
+    ...localeLabels.configurationOptions.pro,
+    ...localeLabels.modeOptions.thinking
+  ];
+  for (const label of labels) {
+    if (await clickIfUnique3(page.getByRole?.("button", { name: label, exact: true }))) {
+      return true;
+    }
+  }
+  return false;
+}
+function configurationMenuLooksRecognized(items, experience, openerLabel) {
+  if (items.some((item) => /(?:model|mode|effort|speed)-(?:switcher|selector)|model-switcher/i.test(item.testId ?? ""))) {
+    return true;
+  }
+  if (experience === "work" && items.some((item) => localeLabels.configurationAxes.advanced.some((label) => visibleLabelMatches(item.label, label)))) {
+    return true;
+  }
+  if (openerLabel === void 0 || items.length === 0) {
+    return false;
+  }
+  const semanticLabels = experience === "work" ? [
+    ...localeLabels.configurationOptions.light,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.max,
+    ...localeLabels.configurationOptions.ultra,
+    ...localeLabels.configurationOptions.standard,
+    ...localeLabels.configurationOptions.fast
+  ] : [
+    ...localeLabels.configurationOptions.instant,
+    ...localeLabels.configurationOptions.medium,
+    ...localeLabels.configurationOptions.high,
+    ...localeLabels.configurationOptions.extraHigh,
+    ...localeLabels.configurationOptions.pro,
+    ...localeLabels.modeOptions.thinking,
+    ...localeLabels.modeOptions.extended
+  ];
+  const matched = new Set(
+    items.filter((item) => semanticLabels.some((label) => visibleLabelMatches(item.label, label))).map((item) => normalizeConfigurationId(item.label))
+  );
+  return matched.size >= 2;
+}
+async function ensureWorkAdvancedPanel(page) {
+  const panel = await readConfigurationPanel(page);
+  if (panel.axisRows.length > 0) return true;
+  if (!await openConfigurationRoot(page, "work")) return false;
+  const reopenedPanel = await readConfigurationPanel(page);
+  if (reopenedPanel.axisRows.length > 0) return true;
+  const items = await enumerateVisibleMenuItems(page);
+  const advanced = items.filter((item) => localeLabels.configurationAxes.advanced.some((label) => visibleLabelMatches(item.label, label)));
+  if (advanced.length !== 1 || !await clickVisibleMenuItem(page, advanced[0])) {
+    return false;
+  }
+  await page.waitForTimeout?.(200);
+  return (await readConfigurationPanel(page)).axisRows.length > 0;
+}
+async function readConfigurationPanel(page) {
+  if (typeof page.evaluate !== "function") {
+    return { axisRows: [], advancedVisible: false };
+  }
+  return page.evaluate((axisLabels) => {
+    const normalize = (value) => value.replace(/\s+/g, " ").trim();
+    const normalizedAxes = Object.fromEntries(
+      Object.entries(axisLabels).map(([axis, labels]) => [
+        axis,
+        labels.map((label) => normalize(label).toLocaleLowerCase())
+      ])
+    );
+    const visible = (element) => {
+      const html = element;
+      const rect = html.getBoundingClientRect?.();
+      if (rect !== void 0 && (rect.width <= 0 || rect.height <= 0)) return false;
+      let current = element;
+      while (current !== null) {
+        if (current.hasAttribute?.("inert") || current.getAttribute?.("aria-hidden") === "true") {
+          return false;
+        }
+        const style = typeof window !== "undefined" ? window.getComputedStyle?.(current) : void 0;
+        if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") {
+          return false;
+        }
+        current = current.parentElement ?? null;
+      }
+      return true;
+    };
+    const overlays = Array.from(document.querySelectorAll(
+      "[role='menu'], [role='listbox'], [data-radix-popper-content-wrapper], [data-radix-menu-content]"
+    )).filter(visible);
+    const roots = overlays.length > 0 ? overlays : Array.from(document.querySelectorAll("main")).filter(visible);
+    const rows = roots.flatMap((root) => Array.from(root.querySelectorAll(
+      "button, [role='button'], [role='menuitem'], [role='menuitemradio'], [role='option']"
+    ))).filter(visible);
+    const axisRows = [];
+    for (const row of rows) {
+      const html = row;
+      const label = normalize(row.getAttribute("aria-label") ?? html.innerText ?? row.textContent ?? "");
+      const normalized = label.toLocaleLowerCase();
+      for (const axis of ["model", "intelligence", "effort", "speed"]) {
+        const candidates = normalizedAxes[axis] ?? [];
+        const prefix = candidates.find((candidate) => normalized === candidate || normalized.startsWith(`${candidate} `));
+        if (prefix === void 0) continue;
+        const value = normalize(label.slice(prefix.length));
+        const item = { axis, label };
+        if (value.length > 0) item.value = value;
+        axisRows.push(item);
+        break;
+      }
+    }
+    const composerRoots = Array.from(document.querySelectorAll(
+      "main form, main [data-testid*='composer' i], main [class*='composer' i]"
+    ));
+    const main = document.querySelector("main");
+    const openerRoots = Array.from(/* @__PURE__ */ new Set([
+      ...composerRoots,
+      ...main === null ? [] : [main]
+    ]));
+    const openerCandidates = Array.from(new Set(openerRoots.flatMap(
+      (root) => Array.from(root.querySelectorAll("button, [role='button']"))
+    ))).filter(visible).map((control) => {
+      const html = control;
+      return {
+        label: normalize(control.getAttribute("aria-label") ?? html.innerText ?? control.textContent ?? ""),
+        testId: control.getAttribute("data-testid") ?? ""
+      };
+    }).filter((item) => !/send|voice|microphone|attach|upload|add files|plus/i.test(`${item.label} ${item.testId}`)).filter((item) => /model-switcher|model-selector|mode-selector/i.test(item.testId) || /\b(?:gpt|sol|luna|terra|instant|medium|high|extra high|pro|thinking|extended|light|standard|fast)\b/i.test(item.label));
+    const result = {
+      axisRows,
+      advancedVisible: axisRows.length > 0
+    };
+    if (openerCandidates.length === 1 && openerCandidates[0]?.label.length) {
+      result.openerLabel = openerCandidates[0].label;
+    }
+    return result;
+  }, localeLabels.configurationAxes).catch(() => ({ axisRows: [], advancedVisible: false }));
+}
+async function findWorkAxisRow(page, axis) {
+  const labels = axis === "modelVersion" ? [] : localeLabels.configurationAxes[axis] ?? [];
+  for (const label of labels) {
+    const pattern = new RegExp(`^${escapeRegExp3(label)}(?:\\s|$)`, "i");
+    for (const role of ["button", "menuitem"]) {
+      const locator = page.getByRole?.(role, { name: pattern });
+      if (locator?.count !== void 0 && await locator.count().catch(() => 0) === 1) {
+        return locator;
+      }
+    }
+  }
+  return void 0;
+}
+async function clickVisibleMenuItem(page, item) {
+  if (item.testId !== void 0 && await clickIfUnique3(page.locator?.(`[data-testid="${escapeAttributeValue2(item.testId)}"]`))) {
+    return true;
+  }
+  for (const role of ["menuitemradio", "menuitem", "option"]) {
+    if (await clickIfUnique3(page.getByRole?.(role, { name: item.label, exact: true }))) {
+      return true;
+    }
+  }
+  return clickIfUnique3(page.getByText?.(item.label, { exact: true }));
+}
+function findConfigurationOption(items, requested) {
+  const normalizedRequested = normalizeConfigurationId(requested);
+  const exact = items.filter((item) => normalizeConfigurationId(item.label) === normalizedRequested);
+  if (exact.length === 1) return exact[0];
+  const semanticLabels = configurationSemanticLabels(requested);
+  for (const wanted of semanticLabels) {
+    const matches = items.filter(
+      (item) => normalizeForLabelMatch(item.label) === normalizeForLabelMatch(wanted) || visibleLabelMatches(item.label, wanted)
+    );
+    if (matches.length === 1) return matches[0];
+  }
+  return void 0;
+}
+function configurationSemanticLabels(requested) {
+  const normalized = normalizeConfigurationId(requested);
+  for (const labels of Object.values(localeLabels.configurationOptions)) {
+    if (labels.some((label) => normalizeConfigurationId(label) === normalized)) {
+      return labels;
+    }
+  }
+  for (const labels of Object.values(localeLabels.modeOptions)) {
+    if (labels.some((label) => normalizeConfigurationId(label) === normalized)) {
+      return labels;
+    }
+  }
+  return [requested];
+}
+function configurationMatchesSelection(inspection, desired) {
+  return selectionEntries(desired).every(([axis, requested]) => {
+    const active = activeConfigurationValue(inspection, axis);
+    return active !== void 0 && configurationValueMatches(active, requested);
+  });
+}
+function activeConfigurationValue(inspection, axis) {
+  const direct = inspection.active[axis];
+  if (direct !== void 0 || inspection.experience !== "chat") {
+    return direct;
+  }
+  if (axis === "model" || axis === "intelligence") {
+    return inspection.active.intelligence ?? inspection.active.effort;
+  }
+  if (axis === "effort") {
+    return inspection.active.effort ?? inspection.active.intelligence;
+  }
+  return void 0;
+}
+function configurationValueMatches(actual, requested) {
+  const normalizedActual = normalizeConfigurationId(actual);
+  const normalizedRequested = normalizeConfigurationId(requested);
+  if (normalizedActual === normalizedRequested) return true;
+  return configurationSemanticLabels(requested).some((label) => normalizeConfigurationId(label) === normalizedActual);
+}
+function selectionEntries(selection) {
+  const entries = [];
+  for (const axis of CONFIGURATION_AXIS_ORDER) {
+    const value = selection[axis];
+    if (typeof value === "string" && value.trim().length > 0) {
+      entries.push([axis, value.trim()]);
+    }
+  }
+  return entries;
+}
+function normalizeDesiredSelection(selection) {
+  const normalized = {};
+  for (const axis of ["model", "intelligence", "effort", "speed"]) {
+    const value = selection[axis]?.trim();
+    if (value !== void 0 && value.length > 0) normalized[axis] = value;
+  }
+  const modelVersion = (selection.modelVersion ?? selection.version)?.trim();
+  if (modelVersion !== void 0 && modelVersion.length > 0) {
+    normalized.modelVersion = modelVersion;
+  }
+  return normalized;
+}
+function menuItemToOption(item) {
+  const option = {
+    id: normalizeConfigurationId(item.label),
+    label: item.label,
+    selected: item.checked === true
+  };
+  if (item.hasPopup !== void 0) option.hasSubmenu = item.hasPopup;
+  return option;
+}
+function dedupeOptions(options) {
+  const seen = /* @__PURE__ */ new Set();
+  return options.filter((option) => {
+    const key = `${option.id}\0${option.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function chatMenuLooksSimplified(items) {
+  const normalized = items.map((item) => normalizeConfigurationId(item.label));
+  const simplified = ["instant", "medium", "high", "extra high", "pro"];
+  return simplified.filter((label) => normalized.includes(label)).length >= 3;
+}
+function isConfigurationAxisRow(label) {
+  const normalized = normalizeForLabelMatch(label);
+  return Object.values(localeLabels.configurationAxes).flat().some((axis) => {
+    const prefix = normalizeForLabelMatch(axis);
+    return normalized === prefix || normalized.startsWith(`${prefix} `);
+  });
+}
+function normalizeConfigurationId(value) {
+  return normalizeForLabelMatch(value).replace(/^gpt[\s-]*/i, "gpt ").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+async function closeConfigurationMenus(page) {
+  if (!await pressConfigurationEscape(page)) return;
+  await page.waitForTimeout?.(50);
+  await pressConfigurationEscape(page);
+}
+async function closeConfigurationSubmenu(page) {
+  if (!await pressConfigurationEscape(page)) return;
+  await page.waitForTimeout?.(200);
+}
+async function pressConfigurationEscape(page) {
+  if (page.keyboard?.press !== void 0) {
+    await page.keyboard.press("Escape");
+    return true;
+  }
+  if (page.cua?.keypress !== void 0) {
+    try {
+      await page.cua.keypress({ keys: ["ESC"] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+async function clickIfUnique3(locator) {
+  if (locator?.count === void 0 || locator.click === void 0) return false;
+  const count = await locator.count().catch(() => 0);
+  if (count === 1) {
+    await locator.click();
+    return true;
+  }
+  if (count <= 1 || locator.nth === void 0) return false;
+  const visible = [];
+  for (let index = 0; index < count; index += 1) {
+    const candidate = locator.nth(index);
+    if (candidate.isVisible !== void 0 && await candidate.isVisible().catch(() => false)) {
+      visible.push(candidate);
+    }
+  }
+  if (visible.length !== 1 || visible[0]?.click === void 0) return false;
+  await visible[0].click();
+  return true;
+}
+async function configurationFailure(page, before, desired, selected, message, code, candidates = []) {
+  const data = {
+    requested: desired,
+    selected,
+    before,
+    after: before,
+    verified: false
+  };
+  return {
+    ok: false,
+    status: "unsupported",
+    data,
+    warnings: [],
+    blocker: {
+      kind: "selector_drift",
+      code,
+      fieldPath: "desired",
+      message,
+      candidates: candidates.map((label) => ({ label })),
+      resumable: true
+    },
+    context: await contextFromPage(page, {
+      experience: before.experience,
+      selectorProfile: before.selectorProfile
+    })
+  };
+}
+function escapeRegExp3(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function escapeAttributeValue2(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function forwardFailure2(result) {
+  const forwarded = {
+    ok: false,
+    status: result.status,
+    warnings: result.warnings,
+    context: result.context
+  };
+  if (result.output_text !== void 0) forwarded.output_text = result.output_text;
+  if (result.reportPath !== void 0) forwarded.reportPath = result.reportPath;
+  if (result.error !== void 0) forwarded.error = result.error;
+  if (result.blocker !== void 0) forwarded.blocker = result.blocker;
+  if (result.steps !== void 0) forwarded.steps = result.steps;
+  return forwarded;
 }
 
 // src/commands/reports.ts
@@ -8303,7 +11069,7 @@ function isRecord3(value) {
 
 // src/commands/response-actions.ts
 async function copyResponse(env, args = {}) {
-  const boot = await ensurePage5(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -8441,16 +11207,19 @@ function mergeResponseMetadata(data, latest) {
   if (latest.thoughtDurationText !== void 0) data.thoughtDurationText = latest.thoughtDurationText;
   if (latest.sourcesAvailable !== void 0) data.sourcesAvailable = latest.sourcesAvailable;
 }
-async function ensurePage5(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
-}
 
 // src/safety/risk.ts
 var commandRisk = {
   "session.bootstrap": "low",
+  "experience.detect": "low",
+  "experience.open": "medium",
+  "configuration.inspect": "low",
+  "configuration.apply": "medium",
+  "work.start": "medium",
+  "work.status": "medium",
+  "work.wait": "low",
+  "work.steer": "medium",
+  "work.readLatest": "medium",
   "threads.search": "medium",
   "threads.open": "medium",
   "threads.new": "low",
@@ -8459,6 +11228,7 @@ var commandRisk = {
   "messages.ask": "medium",
   "messages.wait": "low",
   "messages.readLatest": "medium",
+  "messages.status": "medium",
   "messages.waitAndRead": "medium",
   "artifacts.listLatest": "medium",
   "artifacts.wait": "low",
@@ -8492,8 +11262,9 @@ var descriptors = [
     `await chatgpt.askInThread({ thread: { type: "search", query: "Naming macOS Utility" }, prompt: "Continue." });`,
     `await chatgpt.askInThread({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, prompt: "Continue." });`
   ]),
-  workflow("askWithFiles", "Attach absolute local file paths, optionally set mode, ask, wait, and read.", [
-    `await chatgpt.askWithFiles({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, mode: { model: "GPT-5.6 Sol", intelligence: "High" }, files: ["/absolute/host/path/brief.md"], prompt: "Summarize this.", wait: true, read: { format: "markdown" } });`
+  workflow("askWithFiles", "Attach absolute local file paths, optionally open/configure Chat or Work, ask, wait, and read.", [
+    `await chatgpt.askWithFiles({ thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true, experience: "chat", mode: { model: "GPT-5.6 Sol", intelligence: "High" }, files: ["/absolute/host/path/brief.md"], prompt: "Summarize this.", wait: true, read: { format: "markdown" } });`,
+    `await chatgpt.askWithFiles({ mode: { model: "GPT-5.6 Sol", intelligence: "High" }, files: ["/absolute/host/path/image.jpg"], prompt: "Describe this image.", wait: true });`
   ]),
   workflow("askAndDownload", "Ask ChatGPT to produce a visible downloadable output and save the latest exposed file.", [
     `await chatgpt.askAndDownload({ prompt: "Create a CSV.", download: { destDir: "/absolute/host/output" }, wait: true });`
@@ -8501,12 +11272,15 @@ var descriptors = [
   workflow("runMessages", "Run sequential prompts where later prompts can use earlier step data.", [
     `await chatgpt.runMessages({ messages: [{ id: "first", prompt: "alpha" }, { id: "second", prompt: "beta" }] });`
   ]),
-  workflow("runner.run", "Agents-style facade: run a visible ChatGPT browser-control agent against input, files, thread, existing-tab, mode, and response options.", [
-    `const agent = chatgpt.agent({ name: "reviewer", instructions: "Review deeply." }); await chatgpt.runner.run(agent, { input: "Review this.", thread: { type: "new" } });`,
+  workflow("runner.run", "Agents-style facade: run a visible ChatGPT agent against input, files, thread, existing-tab, experience, configuration, legacy mode, and response options.", [
+    `const agent = chatgpt.agent({ name: "reviewer", instructions: "Review deeply." }); await chatgpt.runner.run(agent, { input: "Review this.", thread: { type: "new" }, experience: "chat" });`,
     `await chatgpt.runner.run(agent, { input: "Continue.", thread: { type: "url", url: "https://chatgpt.com/c/<conversation-id>" }, existingTab: true });`
   ]),
   workflow("responses.create", "Narrow Responses-shaped adapter over the visible ChatGPT browser-control runner; rejects unsupported API-only fields before prompt submission.", [
     `await chatgpt.responses.create({ input: "Summarize.", thread: { type: "current" }, text: { format: "markdown" }, stream: false });`
+  ]),
+  workflow("work.start", "Open Work, optionally apply model/effort/speed configuration, submit one task, and optionally wait/read without blind resubmission.", [
+    `await chatgpt.work.start({ prompt: "Analyze the attached package.", files: ["/absolute/path/package.tgz"], configuration: { model: "GPT-5.6 Sol", effort: "High", speed: "Fast" }, wait: true, read: { format: "markdown" } });`
   ]),
   workflow("copyLatest", "Copy or DOM-read the latest assistant response with Markdown-first fidelity.", [
     `await chatgpt.copyLatest({ prefer: "clipboard" });`
@@ -8548,6 +11322,14 @@ var descriptors = [
     `await chatgpt.createReport(result, { destDir: "/absolute/host/reports" });`
   ]),
   primitive("session.bootstrap", "Attach to ChatGPT in Chrome and detect login/blocker state.", 3e4),
+  primitive("experience.detect", "Detect whether the scoped visible composer is Chat, Work, or unknown and return its selector profile.", 3e4),
+  primitive("experience.open", "Open Chat or Work and verify the target surface from scoped composer evidence.", 3e4),
+  primitive("configuration.inspect", "Inspect the active Chat or Work selector profile, axes, options, and selected values.", 3e4),
+  primitive("configuration.apply", "Apply model/intelligence/effort/speed configuration one axis at a time and verify the final visible state.", 3e4),
+  primitive("work.status", "Read current Work task progress and optionally enumerate visible artifacts.", 5e3),
+  primitive("work.wait", "Wait for the current Work task response to stabilize.", 12e4),
+  primitive("work.steer", "Submit a visible steering message to the current Work task without opening a new task.", 12e4),
+  primitive("work.readLatest", "Read the latest response from the current Work task.", 3e4),
   primitive("threads.new", "Open a new ChatGPT thread.", 3e4),
   primitive("threads.search", "Search visible ChatGPT history by query.", 3e4),
   primitive("threads.open", "Open a thread by URL, conversation id, title, or search result.", 3e4),
@@ -8556,6 +11338,7 @@ var descriptors = [
   primitive("messages.ask", "Compose, submit, optionally wait, and optionally read.", 12e4),
   primitive("messages.wait", "Wait for the latest assistant response to stabilize.", 12e4),
   primitive("messages.readLatest", "Read the latest message as Markdown, normalized text, blocks, or HTML.", 3e4),
+  primitive("messages.status", "Read a compact latest-assistant progress snapshot without treating partial text as complete.", 5e3),
   primitive("messages.waitAndRead", "Wait for completion and read the latest message.", 12e4),
   primitive("artifacts.listLatest", "Detect the latest visible generated ChatGPT artifact, such as an image-only result.", 3e4),
   primitive("artifacts.wait", "Wait for a visible generated ChatGPT artifact to appear and stabilize.", 12e4),
@@ -8567,8 +11350,8 @@ var descriptors = [
   primitive("projects.sources.planAdd", "Dry-run an append-only Project Sources file add from explicit local files without opening ChatGPT.", 3e4),
   primitive("projects.sources.add", "Append explicit local files to a visible ChatGPT Project Sources list after confirmMutation: true.", 18e4),
   primitive("response.copy", "Click Copy response and return clipboard Markdown, with DOM fallback.", 5e3),
-  primitive("modes.set", "Select a visible model, intelligence, effort, or nested model-version candidate when unambiguous.", 3e4),
-  primitive("modes.get", "Read the mode labels shown on the visible composer controls without changing them.", 3e4),
+  primitive("modes.set", "Legacy compatibility command: select a visible model/intelligence/effort/version candidate with historical warning-oriented verification.", 3e4),
+  primitive("modes.get", "Legacy compatibility command: read mode labels shown on visible composer controls without changing them.", 3e4),
   primitive("tools.select", "Select a visible ChatGPT tool when unambiguous.", 3e4)
 ];
 function commandDescriptors() {
@@ -8667,12 +11450,24 @@ function workflowArgs(name) {
   if (name === "ask-and-download") return { prompt: "message to send", destDir: "download destination directory" };
   if (name === "two-turn") return { first: "first message", second: "second message" };
   if (name === "new-ask-read") return { prompt: "message to send" };
+  if (name === "work.start") {
+    return {
+      prompt: "visible Work task prompt",
+      newTask: "start from a blank Work task; defaults to true",
+      files: "optional absolute local file paths",
+      configuration: "optional Work model, effort, and speed values",
+      wait: "optional wait behavior",
+      read: "optional response capture behavior"
+    };
+  }
   if (name === "askWithFiles") {
     return {
       files: "absolute local file paths to attach before submitting",
       prompt: "message to send after files are attached",
       thread: "optional thread selector",
       existingTab: "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
+      experience: "optional chat or work surface",
+      configuration: "optional strict visible Chat or Work configuration",
       mode: 'optional visible mode selection, e.g. { model: "GPT-5.6 Sol", intelligence: "High" }',
       wait: "true or wait options; defaults to true",
       read: 'true or read options such as { format: "markdown" }; defaults to Markdown',
@@ -8683,6 +11478,9 @@ function workflowArgs(name) {
     prompt: "message to send or workflow-specific input",
     thread: "optional thread selector",
     existingTab: "true or explicit policy to claim a user-open Chrome tab instead of opening a replacement",
+    experience: "optional chat or work surface",
+    configuration: "optional surface-aware visible configuration",
+    mode: "legacy visible mode preference",
     report: "optional redacted report settings"
   };
 }
@@ -8706,16 +11504,29 @@ function reportArgs(name) {
 }
 function primitiveArgs(name) {
   if (name === "messages.wait") return {
+    afterTurnCount: "optional pre-submit total-turn baseline that the target response must advance",
+    afterAssistantTurnCount: "optional pre-submit assistant-turn baseline that the target response must advance",
     timeoutMs: "optional wait timeout",
     stableMs: "optional stability window before completion",
     pollMs: "optional polling interval",
     mode: "normal or deep_research",
-    responseContent: "include for current behavior, metadata to omit assistant text and return chars/hash only"
+    responseContent: "include for current behavior, metadata to omit assistant text and return chars/hash only",
+    completionGate: "optional { start, end, requireUnique?, requireNonEmptyBody? } envelope that must validate before completion"
   };
   if (name === "messages.readLatest") return { role: "assistant or user", format: "markdown, normalized_text, visible_text, html, blocks, or all" };
+  if (name === "messages.status") return { maxPreviewChars: "maximum latest-assistant preview characters to return; defaults to 240" };
+  if (name === "experience.detect") return { timeoutMs: "optional timeout for attaching to the ChatGPT page" };
+  if (name === "experience.open") return { experience: "chat or work", timeoutMs: "optional verified-switch timeout" };
+  if (name === "configuration.inspect") return { experience: "optional expected chat or work surface", includeOptions: "open visible axis menus to enumerate options; defaults to true", timeoutMs: "optional inspection timeout" };
+  if (name === "configuration.apply") return { experience: "optional target chat or work surface", desired: "model, intelligence, effort, speed, and/or modelVersion values", strict: "fail when visible postconditions are not verified; defaults to true", timeoutMs: "optional selection timeout" };
+  if (name === "work.status") return { includeArtifacts: "include the latest visible artifact inventory; defaults to false for lightweight polling", maxPreviewChars: "maximum assistant preview characters" };
+  if (name === "work.wait") return { timeoutMs: "optional Work wait timeout", stableMs: "required response stability window", pollMs: "polling interval" };
+  if (name === "work.steer") return { prompt: "visible steering message for the current task", wait: "optional wait behavior", read: "optional response capture behavior" };
+  if (name === "work.readLatest") return { format: "markdown, normalized_text, visible_text, html, blocks, or all", maxChars: "optional capture limit" };
   if (name === "artifacts.listLatest") return { kind: "artifact kind; currently image", max: "maximum artifacts to return" };
   if (name === "artifacts.wait") return { kind: "artifact kind; currently image", afterArtifactCount: "baseline artifact count", requireDownload: "wait until a download affordance is visible" };
   if (name === "artifacts.downloadLatest") return { destDir: "download destination directory", prefer: "download_control or visible_image_source" };
+  if (name === "files.downloadLatest") return { destDir: "download destination directory", filenamePattern: "optional case-insensitive regular expression for the expected filename", from: "latest_assistant, visible_conversation, or assistantIndex" };
   if (name === "response.copy") return { prefer: "clipboard or dom", format: "markdown, normalized_text, visible_text, html, blocks, or all" };
   if (name.startsWith("threads.search")) return { query: "history search query" };
   if (name === "files.preflight") return {
@@ -8761,7 +11572,20 @@ function primitiveExamples(name) {
   if (name === "modes.get") {
     return [
       `await chatgpt.modes.get();`,
-      `// Verify a GPT-5.6 Sol High consult before submitting: const current = await chatgpt.modes.get();`
+      `// Inspect visible controls before a GPT-5.6 Sol High consultation: const current = await chatgpt.modes.get();`
+    ];
+  }
+  if (name === "experience.detect") return [`await chatgpt.experience.detect();`];
+  if (name === "experience.open") return [`await chatgpt.experience.open({ experience: "work" });`];
+  if (name === "configuration.inspect") return [`await chatgpt.configuration.inspect({ experience: "work" });`];
+  if (name === "configuration.apply") return [`await chatgpt.configuration.apply({ experience: "work", desired: { model: "GPT-5.6 Sol", effort: "High", speed: "Fast" }, strict: true });`];
+  if (name === "work.status") return [`await chatgpt.work.status();`];
+  if (name === "work.wait") return [`await chatgpt.work.wait({ timeoutMs: 600000 });`];
+  if (name === "work.steer") return [`await chatgpt.work.steer({ prompt: "Focus the comparison on deployment ergonomics." });`];
+  if (name === "work.readLatest") return [`await chatgpt.work.readLatest({ format: "markdown" });`];
+  if (name === "messages.wait") {
+    return [
+      `await chatgpt.messages.wait({ afterAssistantTurnCount, afterTurnCount, responseContent: "metadata", completionGate: { start: "<Start>", end: "<End>", requireUnique: true, requireNonEmptyBody: true } });`
     ];
   }
   if (name === "files.preflight") {
@@ -8775,6 +11599,9 @@ function primitiveExamples(name) {
       `await chatgpt.files.attach({ paths: ["/absolute/host/path.jpg"] });`,
       String.raw`// On Windows backend hosts, use paths such as C:\Users\you\Pictures\image.jpg.`
     ];
+  }
+  if (name === "files.downloadLatest") {
+    return [`await chatgpt.files.downloadLatest({ destDir: "/absolute/host/output", filenamePattern: "^report\\.csv$" });`];
   }
   if (name === "projects.sources.list") {
     return [`await chatgpt.projects.sources.list({ projectUrl: "https://chatgpt.com/g/g-p-example/project" });`];
@@ -8797,7 +11624,7 @@ function primitiveBlockers(name) {
   if (name === "projects.sources.planAdd") return ["not_found", "permission", "upload_failed"];
   if (name.startsWith("projects.sources.")) return ["browser_bridge_unavailable", "login_required", "selector_drift", "confirmation", "permission", "upload_failed"];
   if (name.startsWith("artifacts.")) return ["browser_bridge_unavailable", "login_required", "artifact_unavailable", "artifact_selector_drift", "artifact_download_unavailable"];
-  if (name.startsWith("modes.") || name.startsWith("tools.")) return ["browser_bridge_unavailable", "login_required", "selector_drift"];
+  if (name.startsWith("modes.") || name.startsWith("tools.") || name.startsWith("experience.") || name.startsWith("configuration.") || name.startsWith("work.")) return ["browser_bridge_unavailable", "login_required", "selector_drift"];
   return commonBlockers();
 }
 function commonBlockers() {
@@ -8820,7 +11647,7 @@ function cloneDescriptor(descriptor) {
 }
 
 // src/commands/conversation.ts
-var CHATGPT_HOME2 = "https://chatgpt.com/";
+var CHATGPT_HOME3 = "https://chatgpt.com/";
 async function ensureConversationTarget(page, target, options) {
   const targetUrl = absoluteConversationUrl(target);
   const expectedConversationId = parseConversationId(targetUrl);
@@ -8850,7 +11677,7 @@ async function waitForConversationHydrated(page, timeoutMs, expectedConversation
 }
 function absoluteConversationUrl(target) {
   if (target.href !== void 0 && target.href.startsWith("/")) {
-    return new URL(target.href, CHATGPT_HOME2).toString();
+    return new URL(target.href, CHATGPT_HOME3).toString();
   }
   return target.href ?? target.url;
 }
@@ -8863,7 +11690,7 @@ function ensureResult(navigated, targetUrl, expectedConversationId) {
 }
 
 // src/commands/threads.ts
-var CHATGPT_HOME3 = "https://chatgpt.com/";
+var CHATGPT_HOME4 = "https://chatgpt.com/";
 function extractThreadSearchResultsFromHtml(html) {
   const anchors = html.matchAll(/<a\b(?<attrs>[^>]*\bhref=["'](?<href>\/c\/[^"']+)["'][^>]*)>(?<body>[\s\S]*?)<\/a>/gi);
   const results = [];
@@ -8893,7 +11720,7 @@ function extractThreadSearchResultsFromHtml(html) {
   return dedupeResults(results);
 }
 async function searchThreads(env, args) {
-  const boot = await ensurePage6(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -8915,7 +11742,7 @@ async function searchThreads(env, args) {
   }
 }
 async function newThread(env, args = {}) {
-  const boot = await ensurePage6(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -8924,7 +11751,7 @@ async function newThread(env, args = {}) {
     try {
       await newChatButton(page).click?.();
     } catch {
-      await page.goto?.(CHATGPT_HOME3, { waitUntil: "domcontentloaded", timeout: args.timeoutMs ?? 3e4 });
+      await page.goto?.(CHATGPT_HOME4, { waitUntil: "domcontentloaded", timeout: args.timeoutMs ?? 3e4 });
     }
     await page.waitForTimeout?.(500);
     const state = await readPageState(page);
@@ -8934,7 +11761,7 @@ async function newThread(env, args = {}) {
   }
 }
 async function openThread(env, args, previousResults) {
-  const boot = await ensurePage6(env);
+  const boot = await ensurePage(env);
   if (!boot.ok) {
     return boot;
   }
@@ -8963,32 +11790,26 @@ async function openThread(env, args, previousResults) {
     return resultError(error instanceof Error ? error : new Error(String(error)), await contextFromPage(page));
   }
 }
-async function ensurePage6(env) {
-  if (env.page !== void 0) {
-    return resultOk({}, await contextFromPage(env.page));
-  }
-  return bootstrap(env, { preferExistingTab: true });
-}
 async function resolveOpenTarget(env, args, previousResults) {
   if (args.url !== void 0) {
     return { url: args.url };
   }
   if (args.conversationId !== void 0) {
-    return { url: new URL(`/c/${args.conversationId}`, CHATGPT_HOME3).toString() };
+    return { url: new URL(`/c/${args.conversationId}`, CHATGPT_HOME4).toString() };
   }
   if (args.fromStep !== void 0 && previousResults !== void 0) {
     const previous = previousResults.get(args.fromStep);
     const data = previous?.data;
     const selected = selectSearchResult(data?.results ?? [], args.select ?? "first");
     if (selected !== void 0) {
-      return { href: selected.href, url: new URL(selected.href, CHATGPT_HOME3).toString(), title: selected.title };
+      return { href: selected.href, url: new URL(selected.href, CHATGPT_HOME4).toString(), title: selected.title };
     }
   }
   if (args.title !== void 0) {
     const search = await searchThreads(env, { query: args.title, limit: 10 });
     const selected = selectSearchResult(search.data?.results ?? [], { title: args.title }) ?? search.data?.results[0];
     if (selected !== void 0) {
-      return { href: selected.href, url: new URL(selected.href, CHATGPT_HOME3).toString(), title: selected.title };
+      return { href: selected.href, url: new URL(selected.href, CHATGPT_HOME4).toString(), title: selected.title };
     }
   }
   return void 0;
@@ -9122,6 +11943,312 @@ function filterResultsByQuery(results, query) {
   });
 }
 
+// src/commands/work.ts
+var NEW_WORK_LABELS = localeLabels.newWork;
+async function startWork(env, args) {
+  const prompt = args.prompt.trim();
+  if (prompt.length === 0) {
+    return {
+      ok: false,
+      status: "unsupported",
+      warnings: [],
+      blocker: {
+        kind: "selector_drift",
+        code: "empty_work_prompt",
+        fieldPath: "prompt",
+        message: "work.start requires a non-empty visible prompt.",
+        resumable: false
+      },
+      context: { timestamp: (/* @__PURE__ */ new Date()).toISOString() }
+    };
+  }
+  const boot = await ensurePage(env);
+  if (!boot.ok) {
+    return boot;
+  }
+  const page = env.page;
+  try {
+    const surface = await openExperience(env, {
+      experience: "work",
+      ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    });
+    if (!surface.ok) {
+      return forwardCommandFailure(surface);
+    }
+    if (args.newTask !== false) {
+      const fresh = await ensureBlankWorkTask(env, args.timeoutMs);
+      if (!fresh.ok) {
+        return forwardCommandFailure(fresh);
+      }
+    }
+    const baselineTurnCount = await countPageMessages(page).catch(() => void 0);
+    const baselineAssistantTurnCount = await countPageMessages(page, "assistant").catch(() => void 0);
+    let configuration;
+    if (args.configuration !== void 0) {
+      const applied = await applyConfiguration(env, {
+        experience: "work",
+        desired: args.configuration,
+        strict: true,
+        ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+      });
+      if (!applied.ok || applied.data === void 0) {
+        return forwardCommandFailure(applied);
+      }
+      configuration = applied.data;
+    }
+    if ((args.files?.length ?? 0) > 0) {
+      const attach = await attachFiles(env, {
+        paths: args.files ?? [],
+        ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+      });
+      if (!attach.ok) {
+        return forwardCommandFailure(attach);
+      }
+    }
+    const compose = await composeMessage(env, {
+      text: prompt,
+      mode: "replace",
+      ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    });
+    if (!compose.ok) {
+      return forwardCommandFailure(compose);
+    }
+    const submitArgs = {
+      text: prompt,
+      ...baselineTurnCount === void 0 ? {} : { previousTurnCount: baselineTurnCount },
+      ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+    };
+    const submit = await submitMessage(env, submitArgs);
+    if (!submit.ok || submit.data === void 0) {
+      return forwardCommandFailure(submit);
+    }
+    const task = await workTaskRef(env, baselineTurnCount, baselineAssistantTurnCount);
+    const data = { task, submitted: submit.data };
+    if (configuration !== void 0) data.configuration = configuration;
+    let waitResult;
+    if (args.wait === true || typeof args.wait === "object") {
+      const waitArgs = typeof args.wait === "object" ? { ...args.wait } : {};
+      if (baselineTurnCount !== void 0) waitArgs.afterTurnCount = baselineTurnCount;
+      if (baselineAssistantTurnCount !== void 0) waitArgs.afterAssistantTurnCount = baselineAssistantTurnCount;
+      waitResult = await waitForMessage(env, waitArgs);
+      if (waitResult.data !== void 0) data.wait = waitResult.data;
+      if (!waitResult.ok && waitResult.status !== "partial") {
+        return forwardWorkFailure(waitResult, data);
+      }
+    }
+    if (args.read === true || typeof args.read === "object") {
+      const read = await readLatest(env, typeof args.read === "object" ? args.read : {});
+      if (!read.ok || read.data === void 0) {
+        return forwardWorkFailure(read, data);
+      }
+      data.response = read.data;
+    }
+    if (waitResult !== void 0 && !waitResult.ok) {
+      const partial = {
+        ok: false,
+        status: "partial",
+        data,
+        warnings: [
+          ...waitResult.warnings,
+          "The Work task was submitted exactly once, but completion was not verified."
+        ],
+        context: await workContext(env)
+      };
+      const outputText = data.response?.text ?? waitResult.output_text;
+      if (outputText !== void 0) partial.output_text = outputText;
+      return partial;
+    }
+    return resultOk(
+      data,
+      await workContext(env, surface.data?.selectorProfile),
+      ["Work task submission uses matching-turn recovery and will not blindly resubmit the prompt."]
+    );
+  } catch (error) {
+    return resultError(error instanceof Error ? error : new Error(String(error)), await workContext(env));
+  }
+}
+async function workStatus(env, args = {}) {
+  const ready = await requireWork(env);
+  if (!ready.ok) return forwardCommandFailure(ready);
+  const message = await messageStatus(env, args);
+  if (!message.ok || message.data === void 0) {
+    return forwardCommandFailure(message);
+  }
+  const data = {
+    experience: "work",
+    task: await workTaskRef(env, void 0, void 0),
+    message: message.data
+  };
+  const warnings = [...message.warnings];
+  if (args.includeArtifacts === true) {
+    const artifacts = await listLatestArtifacts(env, {});
+    if (artifacts.ok && artifacts.data !== void 0) {
+      data.artifacts = artifacts.data;
+      warnings.push(...artifacts.warnings);
+    } else {
+      warnings.push(`Work artifact status was unavailable: ${artifacts.blocker?.message ?? artifacts.error?.message ?? artifacts.status}`);
+    }
+  }
+  return resultOk(data, {
+    ...message.context,
+    experience: "work",
+    ...ready.data?.selectorProfile === void 0 ? {} : { selectorProfile: ready.data.selectorProfile }
+  }, warnings);
+}
+async function waitForWork(env, args = {}) {
+  const ready = await requireWork(env);
+  if (!ready.ok) return forwardCommandFailure(ready);
+  return markWorkResult(await waitForMessage(env, args), ready.data?.selectorProfile);
+}
+async function steerWork(env, args) {
+  const ready = await requireWork(env);
+  if (!ready.ok) return forwardCommandFailure(ready);
+  return markWorkResult(await askMessage(env, {
+    text: args.prompt,
+    wait: args.wait ?? false,
+    read: args.read ?? false,
+    ...args.timeoutMs === void 0 ? {} : { timeoutMs: args.timeoutMs }
+  }), ready.data?.selectorProfile);
+}
+async function readLatestWork(env, args = {}) {
+  const ready = await requireWork(env);
+  if (!ready.ok) return forwardCommandFailure(ready);
+  return markWorkResult(await readLatest(env, args), ready.data?.selectorProfile);
+}
+async function ensureBlankWorkTask(env, timeoutMs) {
+  const page = env.page;
+  const currentTurns = await countPageMessages(page).catch(() => 0);
+  if (currentTurns === 0) {
+    return resultOk({ fresh: true }, await workContext(env));
+  }
+  if (await clickNewWorkControl(page)) {
+    const started = Date.now();
+    const timeout = timeoutMs ?? 3e4;
+    while (Date.now() - started < timeout) {
+      await page.waitForTimeout?.(150);
+      if (await countPageMessages(page).catch(() => currentTurns) === 0) {
+        return resultOk({ fresh: true }, await workContext(env));
+      }
+    }
+    return {
+      ok: false,
+      status: "blocked",
+      warnings: [],
+      blocker: {
+        kind: "selector_drift",
+        code: "work_new_task_unverified",
+        message: "The new Work task control was clicked, but the visible conversation did not reset to a blank task.",
+        resumable: true
+      },
+      context: await workContext(env)
+    };
+  }
+  return {
+    ok: false,
+    status: "blocked",
+    warnings: [],
+    blocker: {
+      kind: "selector_drift",
+      code: "work_new_task_control_not_found",
+      message: "A current Work task is loaded and no unique new-task control was found. Pass newTask: false only when intentionally steering the current task.",
+      candidates: NEW_WORK_LABELS.map((label) => ({ label })),
+      resumable: true
+    },
+    context: await workContext(env)
+  };
+}
+async function clickNewWorkControl(page) {
+  for (const label of NEW_WORK_LABELS) {
+    for (const role of ["button", "link"]) {
+      if (await clickIfUnique4(page.getByRole?.(role, { name: label, exact: true }))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+async function requireWork(env) {
+  const detected = await detectExperience(env);
+  if (detected.ok && detected.data?.experience === "work") {
+    return resultOk({
+      experience: "work",
+      selectorProfile: detected.data.selectorProfile
+    }, detected.context);
+  }
+  return {
+    ok: false,
+    status: "unsupported",
+    warnings: detected.warnings,
+    blocker: {
+      kind: "selector_drift",
+      code: "work_surface_required",
+      fieldPath: "experience",
+      message: `This command requires the visible Work surface; detected ${detected.data?.experience ?? "unknown"}.`,
+      resumable: true
+    },
+    context: detected.context
+  };
+}
+async function workTaskRef(env, baselineTurnCount, baselineAssistantTurnCount) {
+  const context = await workContext(env);
+  const task = {};
+  if (context.url !== void 0) task.url = context.url;
+  if (context.conversationId !== void 0) task.conversationId = context.conversationId;
+  if (context.title !== void 0) task.title = context.title;
+  if (baselineTurnCount !== void 0) task.baselineTurnCount = baselineTurnCount;
+  if (baselineAssistantTurnCount !== void 0) task.baselineAssistantTurnCount = baselineAssistantTurnCount;
+  return task;
+}
+async function workContext(env, selectorProfile) {
+  return contextFromPage(env.page, {
+    experience: "work",
+    ...selectorProfile === void 0 ? {} : { selectorProfile }
+  });
+}
+function markWorkResult(result, selectorProfile) {
+  return {
+    ...result,
+    context: {
+      ...result.context,
+      experience: "work",
+      ...selectorProfile === void 0 ? {} : { selectorProfile }
+    }
+  };
+}
+function forwardWorkFailure(result, data) {
+  const forwarded = {
+    ok: false,
+    status: result.status,
+    data,
+    warnings: result.warnings,
+    context: result.context
+  };
+  if (result.output_text !== void 0) forwarded.output_text = result.output_text;
+  if (result.blocker !== void 0) forwarded.blocker = result.blocker;
+  if (result.error !== void 0) forwarded.error = result.error;
+  return forwarded;
+}
+function forwardCommandFailure(result) {
+  const forwarded = {
+    ok: false,
+    status: result.status,
+    warnings: result.warnings,
+    context: result.context
+  };
+  if (result.output_text !== void 0) forwarded.output_text = result.output_text;
+  if (result.reportPath !== void 0) forwarded.reportPath = result.reportPath;
+  if (result.blocker !== void 0) forwarded.blocker = result.blocker;
+  if (result.error !== void 0) forwarded.error = result.error;
+  if (result.steps !== void 0) forwarded.steps = result.steps;
+  return forwarded;
+}
+async function clickIfUnique4(locator) {
+  if (locator?.count === void 0 || locator.click === void 0) return false;
+  if (await locator.count().catch(() => 0) !== 1) return false;
+  await locator.click();
+  return true;
+}
+
 // src/commands/sequence.ts
 var defaultSequencePolicy = {
   stopOnError: true,
@@ -9159,6 +12286,24 @@ async function executeStep(step, env, previousResults) {
   switch (step.command) {
     case "session.bootstrap":
       return bootstrap(env, step.args);
+    case "experience.detect":
+      return detectExperience(env, step.args);
+    case "experience.open":
+      return openExperience(env, step.args);
+    case "configuration.inspect":
+      return inspectConfiguration(env, step.args);
+    case "configuration.apply":
+      return applyConfiguration(env, step.args);
+    case "work.start":
+      return startWork(env, step.args);
+    case "work.status":
+      return workStatus(env, step.args);
+    case "work.wait":
+      return waitForWork(env, step.args);
+    case "work.steer":
+      return steerWork(env, step.args);
+    case "work.readLatest":
+      return readLatestWork(env, step.args);
     case "threads.search":
       return searchThreads(env, step.args);
     case "threads.open":
@@ -9175,6 +12320,8 @@ async function executeStep(step, env, previousResults) {
       return waitForMessage(env, step.args);
     case "messages.readLatest":
       return readLatest(env, step.args);
+    case "messages.status":
+      return messageStatus(env, step.args);
     case "messages.waitAndRead":
       return waitAndRead(env, step.args);
     case "artifacts.listLatest":
@@ -9455,6 +12602,12 @@ function toRunResult(agent, result) {
   const output = runItemsFromResult(result, outputText);
   const state = runStateFromResult(result, interruptions);
   const data = { outputText };
+  const submissionState = readSubmissionState(result.data);
+  const completionState = readCompletionState(result.data);
+  const generationActive = readGenerationActive(result.data);
+  if (submissionState !== void 0) data.submissionState = submissionState;
+  if (completionState !== void 0) data.completionState = completionState;
+  if (generationActive !== void 0) data.generationActive = generationActive;
   if (outputText.length > 0) {
     const envelopeArgs = {
       outputText,
@@ -9508,12 +12661,49 @@ function parseFinalOutput(agent, outputText) {
   return outputText;
 }
 function runItemsFromResult(result, outputText) {
-  const items = messageItemsFromData(result.data);
-  if (!items.some((item) => item.type === "message.completed") && outputText.length > 0) {
-    items.push({ type: "message.completed", role: "assistant", output_text: outputText, format: "markdown" });
+  const items = lifecycleItemsFromSteps(result.steps);
+  items.push(...messageItemsFromData(result.data));
+  if (!items.some((item) => item.type === "message.completed" || item.type === "message.in_progress") && outputText.length > 0) {
+    if (result.status === "partial" && readCompletionState(result.data) !== "complete") {
+      items.push(inProgressItem(outputText, readCompletionState(result.data), readGenerationActive(result.data)));
+    } else {
+      items.push({ type: "message.completed", role: "assistant", output_text: outputText, format: "markdown" });
+    }
   }
   if (result.blocker !== void 0) {
     items.push({ type: "run.blocked", blocker: augmentCommandBlocker(result.blocker) });
+  }
+  return items;
+}
+function lifecycleItemsFromSteps(steps) {
+  if (steps === void 0) return [];
+  const items = [];
+  for (const step of steps) {
+    if (!step.ok || !isRecord4(step.dataPreview)) continue;
+    if (step.command === "experience.open") {
+      const experience = step.dataPreview.experience;
+      if (experience === "chat" || experience === "work") {
+        const item = {
+          type: "experience.opened",
+          experience
+        };
+        if (typeof step.dataPreview.changed === "boolean") item.changed = step.dataPreview.changed;
+        items.push(item);
+      }
+      continue;
+    }
+    if (step.command === "configuration.apply") {
+      const item = {
+        type: "configuration.applied"
+      };
+      if (isRecord4(step.dataPreview.requested)) {
+        item.requested = step.dataPreview.requested;
+      }
+      if (typeof step.dataPreview.verified === "boolean") {
+        item.verified = step.dataPreview.verified;
+      }
+      items.push(item);
+    }
   }
   return items;
 }
@@ -9529,7 +12719,11 @@ function messageItemsFromData(data) {
     });
   }
   if (typeof data.responseText === "string" && data.responseText.length > 0) {
-    items.push({ type: "message.completed", role: "assistant", output_text: data.responseText, format: "markdown" });
+    if (readCompletionState(data) === "complete" || data.complete === true) {
+      items.push({ type: "message.completed", role: "assistant", output_text: data.responseText, format: "markdown" });
+    } else {
+      items.push(inProgressItem(data.responseText, readCompletionState(data), readGenerationActive(data)));
+    }
   }
   if (items.length > 0) return items;
   for (const value of Object.values(data)) {
@@ -9547,7 +12741,66 @@ function runStateFromResult(result, interruptions) {
   };
   const thread = threadRefFromContext(result.context);
   if (thread !== void 0) state.thread = thread;
+  const submissionState = readSubmissionState(result.data);
+  const completionState = readCompletionState(result.data);
+  if (submissionState !== void 0) state.submissionState = submissionState;
+  if (completionState !== void 0) state.completionState = completionState;
   return state;
+}
+function inProgressItem(outputText, completionState, generationActive) {
+  const item = {
+    type: "message.in_progress",
+    role: "assistant",
+    output_text: outputText,
+    preview: outputText.length > 160 ? `${outputText.slice(0, 159)}...` : outputText,
+    format: "markdown",
+    textLength: outputText.length,
+    textHash: hashText(outputText)
+  };
+  if (completionState !== void 0) item.completionState = completionState;
+  if (generationActive !== void 0) item.generationActive = generationActive;
+  return item;
+}
+function readCompletionState(data) {
+  if (!isRecord4(data)) return void 0;
+  const value = data.completionState;
+  if (value === "complete" || value === "generating" || value === "stopped" || value === "partial" || value === "unknown") {
+    return value;
+  }
+  for (const nested of Object.values(data)) {
+    const nestedState = readCompletionState(nested);
+    if (nestedState !== void 0) return nestedState;
+  }
+  return void 0;
+}
+function readSubmissionState(data) {
+  if (!isRecord4(data)) return void 0;
+  const value = data.submissionState;
+  if (value === "not_submitted" || value === "submitted" || value === "submitted_unconfirmed" || value === "submitted_generating") {
+    return value;
+  }
+  for (const nested of Object.values(data)) {
+    const nestedState = readSubmissionState(nested);
+    if (nestedState !== void 0) return nestedState;
+  }
+  return void 0;
+}
+function readGenerationActive(data) {
+  if (!isRecord4(data)) return void 0;
+  if (typeof data.generationActive === "boolean") return data.generationActive;
+  for (const nested of Object.values(data)) {
+    const value = readGenerationActive(nested);
+    if (value !== void 0) return value;
+  }
+  return void 0;
+}
+function hashText(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 function threadRefFromContext(context) {
   const thread = {};
@@ -9574,6 +12827,8 @@ var acceptedTopLevelFields = /* @__PURE__ */ new Set([
   "thread",
   "existingTab",
   "preferExistingTab",
+  "experience",
+  "configuration",
   "attachments",
   "mode",
   "tools",
@@ -9584,7 +12839,7 @@ var acceptedTopLevelFields = /* @__PURE__ */ new Set([
   "instructionsMode"
 ]);
 var unsupportedAlternatives = {
-  model: "Use mode for visible ChatGPT UI mode preference. This does not select an API model.",
+  model: "Use experience plus configuration for visible ChatGPT UI preferences. Legacy mode remains supported. These do not select an API model.",
   temperature: "No browser-control equivalent. ChatGPT web does not expose API temperature.",
   top_p: "No browser-control equivalent. ChatGPT web does not expose API nucleus sampling.",
   seed: "No browser-control equivalent. Visible ChatGPT web does not expose deterministic API seeds.",
@@ -9679,6 +12934,8 @@ function responsesCreateArgsToRunInput(args) {
   if (args.thread !== void 0) runInput2.thread = args.thread;
   if (args.existingTab !== void 0) runInput2.existingTab = args.existingTab;
   if (args.preferExistingTab !== void 0) runInput2.preferExistingTab = args.preferExistingTab;
+  if (args.experience !== void 0) runInput2.experience = args.experience;
+  if (args.configuration !== void 0) runInput2.configuration = args.configuration;
   if (args.attachments !== void 0) runInput2.attachments = args.attachments;
   if (args.mode !== void 0) runInput2.mode = args.mode;
   if (args.tools !== void 0) runInput2.tools = args.tools;
@@ -9694,6 +12951,12 @@ function responseFromRunResult(result, now = /* @__PURE__ */ new Date()) {
   if (result.data?.thread !== void 0) browserControl.thread = result.data.thread;
   const reportPath = result.data?.reportPath ?? result.reportPath;
   if (reportPath !== void 0) browserControl.reportPath = reportPath;
+  const submissionState = result.state.submissionState ?? result.data?.submissionState;
+  const completionState = result.state.completionState ?? result.data?.completionState;
+  const generationActive = result.data?.generationActive;
+  if (submissionState !== void 0) browserControl.submissionState = submissionState;
+  if (completionState !== void 0) browserControl.completionState = completionState;
+  if (generationActive !== void 0) browserControl.generationActive = generationActive;
   if (result.output_text.length > 0) {
     const envelopeArgs = {
       outputText: result.output_text,
@@ -9797,6 +13060,10 @@ function runItemEventName(item) {
   switch (item.type) {
     case "thread.opened":
       return "thread_opened";
+    case "experience.opened":
+      return "experience_opened";
+    case "configuration.applied":
+      return "configuration_applied";
     case "mode.selected":
       return "mode_selected";
     case "tool.selected":
@@ -9805,6 +13072,8 @@ function runItemEventName(item) {
       return "file_attached";
     case "message.submitted":
       return "message_submitted";
+    case "message.in_progress":
+      return "message_in_progress";
     case "message.completed":
       return "message_completed";
     case "file.downloaded":
@@ -9859,6 +13128,26 @@ function createChatGPT(options = {}) {
     session: {
       bootstrap: (args) => bootstrap(env, args)
     },
+    experience: {
+      detect: (args) => detectExperience(env, args),
+      open: (args) => openExperience(env, args)
+    },
+    configuration: {
+      inspect: (args) => inspectConfiguration(env, args),
+      apply: (args) => applyConfiguration(env, args)
+    },
+    work: {
+      start: (args) => startWork(env, args),
+      status: (args) => workStatus(env, args),
+      wait: (args) => waitForWork(env, args),
+      steer: (args) => steerWork(env, args),
+      readLatest: (args) => readLatestWork(env, args),
+      artifacts: {
+        listLatest: (args) => listLatestArtifacts(env, args),
+        wait: (args) => waitForArtifact(env, args),
+        downloadLatest: (args) => downloadLatestArtifact(env, args)
+      }
+    },
     threads: {
       new: (args) => newThread(env, args),
       search: (args) => searchThreads(env, args),
@@ -9870,6 +13159,7 @@ function createChatGPT(options = {}) {
       ask: (args) => askMessage(env, args),
       wait: (args) => waitForMessage(env, args),
       readLatest: (args) => readLatest(env, args),
+      status: (args) => messageStatus(env, args),
       waitAndRead: (args) => waitAndRead(env, args)
     },
     files: {
@@ -9959,6 +13249,30 @@ function pathsFromAttachStep(step) {
   const paths = step.args.paths;
   return paths.every((item) => typeof item === "string") ? paths : [];
 }
+function appendSurfaceConfigurationSteps(steps, preferences) {
+  if (preferences.experience !== void 0) {
+    steps.push({
+      id: "experience",
+      command: "experience.open",
+      args: { experience: preferences.experience }
+    });
+  }
+  if (preferences.configuration !== void 0) {
+    steps.push({
+      id: "configuration",
+      command: "configuration.apply",
+      args: {
+        ...preferences.experience === void 0 ? {} : { experience: preferences.experience },
+        desired: preferences.configuration,
+        strict: true
+      }
+    });
+    return;
+  }
+  if (preferences.mode !== void 0) {
+    steps.push({ id: "mode", command: "modes.set", args: preferences.mode });
+  }
+}
 function normalizeLimits(limits) {
   return {
     maxPromptsPerRun: limits?.maxPromptsPerRun ?? 5,
@@ -9971,7 +13285,7 @@ function normalizeLimits(limits) {
 function checkRunBudget(plan, limits) {
   const prompts = plan.steps.filter((step) => step.command === "messages.ask" || step.command === "messages.submit").length;
   const threads = plan.steps.filter((step) => step.command === "threads.new" || step.command === "threads.open").length;
-  const reads = plan.steps.filter((step) => step.command === "messages.readLatest" || step.command === "messages.waitAndRead" || step.command === "response.copy").length + plan.steps.filter((step) => step.command === "messages.ask" && askStepReads(step.args)).length;
+  const reads = plan.steps.filter((step) => step.command === "messages.readLatest" || step.command === "messages.status" || step.command === "messages.waitAndRead" || step.command === "response.copy").length + plan.steps.filter((step) => step.command === "messages.ask" && askStepReads(step.args)).length;
   const violations = [];
   if (prompts > limits.maxPromptsPerRun) violations.push(`prompts ${prompts}/${limits.maxPromptsPerRun}`);
   if (threads > limits.maxThreadsOpenedPerRun) violations.push(`threads ${threads}/${limits.maxThreadsOpenedPerRun}`);
@@ -10058,10 +13372,11 @@ function planAgentWorkflowFromNormalized(agent, input, defaults = {}) {
     ),
     ...threadSteps(thread)
   ];
-  const mode = input.mode ?? agent.defaults.mode ?? defaults.mode;
-  if (mode !== void 0) {
-    steps.push({ id: "mode", command: "modes.set", args: mode });
-  }
+  appendSurfaceConfigurationSteps(steps, {
+    experience: input.experience ?? agent.defaults.experience ?? defaults.experience,
+    configuration: input.configuration ?? agent.defaults.configuration ?? defaults.configuration,
+    mode: input.mode ?? agent.defaults.mode ?? defaults.mode
+  });
   for (const [index, tool] of input.tools.entries()) {
     steps.push({ id: `tool${index + 1}`, command: "tools.select", args: tool });
   }
@@ -10123,6 +13438,8 @@ function normalizeRunnerInput(agent, input) {
   if (args.thread !== void 0) normalized.thread = args.thread;
   if (args.existingTab !== void 0) normalized.existingTab = args.existingTab;
   if (args.preferExistingTab !== void 0) normalized.preferExistingTab = args.preferExistingTab;
+  if (args.experience !== void 0) normalized.experience = args.experience;
+  if (args.configuration !== void 0) normalized.configuration = args.configuration;
   if (mode !== void 0) normalized.mode = mode;
   if (args.response !== void 0) normalized.read = args.response;
   if (args.download !== void 0) normalized.download = args.download;
@@ -10242,10 +13559,11 @@ function planAskWorkflow(args, defaults = {}) {
     ),
     ...threadSteps(thread)
   ];
-  const mode = args.mode ?? defaults.mode;
-  if (mode !== void 0) {
-    steps.push({ id: "mode", command: "modes.set", args: mode });
-  }
+  appendSurfaceConfigurationSteps(steps, {
+    experience: args.experience ?? defaults.experience,
+    configuration: args.configuration ?? defaults.configuration,
+    mode: args.mode ?? defaults.mode
+  });
   for (const [index, tool] of (args.tools ?? []).entries()) {
     steps.push({ id: `tool${index + 1}`, command: "tools.select", args: tool });
   }
@@ -10314,10 +13632,11 @@ function planRunMessages(args, defaults = {}) {
     ),
     ...threadSteps(thread)
   ];
-  const mode = args.mode ?? defaults.mode;
-  if (mode !== void 0) {
-    steps.push({ id: "mode", command: "modes.set", args: mode });
-  }
+  appendSurfaceConfigurationSteps(steps, {
+    experience: args.experience ?? defaults.experience,
+    configuration: args.configuration ?? defaults.configuration,
+    mode: args.mode ?? defaults.mode
+  });
   args.messages.forEach((message, index) => {
     steps.push({
       id: message.id ?? `message${index + 1}`,
@@ -10549,6 +13868,15 @@ var backendCommands = [
   "describe",
   "help",
   "session.bootstrap",
+  "experience.detect",
+  "experience.open",
+  "configuration.inspect",
+  "configuration.apply",
+  "work.start",
+  "work.status",
+  "work.wait",
+  "work.steer",
+  "work.readLatest",
   "threads.new",
   "threads.search",
   "threads.open",
@@ -10557,6 +13885,7 @@ var backendCommands = [
   "messages.ask",
   "messages.wait",
   "messages.readLatest",
+  "messages.status",
   "messages.waitAndRead",
   "artifacts.listLatest",
   "artifacts.wait",
@@ -10787,6 +14116,24 @@ async function dispatchBackendCommand(client, request) {
       );
     case "session.bootstrap":
       return client.session.bootstrap(emptyToUndefined(payload));
+    case "experience.detect":
+      return client.experience.detect(emptyToUndefined(payload));
+    case "experience.open":
+      return client.experience.open(payload);
+    case "configuration.inspect":
+      return client.configuration.inspect(emptyToUndefined(payload));
+    case "configuration.apply":
+      return client.configuration.apply(payload);
+    case "work.start":
+      return client.work.start(payload);
+    case "work.status":
+      return client.work.status(emptyToUndefined(payload));
+    case "work.wait":
+      return client.work.wait(emptyToUndefined(payload));
+    case "work.steer":
+      return client.work.steer(payload);
+    case "work.readLatest":
+      return client.work.readLatest(emptyToUndefined(payload));
     case "threads.new":
       return client.threads.new(emptyToUndefined(payload));
     case "threads.search":
@@ -10803,6 +14150,8 @@ async function dispatchBackendCommand(client, request) {
       return client.messages.wait(emptyToUndefined(payload));
     case "messages.readLatest":
       return client.messages.readLatest(emptyToUndefined(payload));
+    case "messages.status":
+      return client.messages.status(emptyToUndefined(payload));
     case "messages.waitAndRead":
       return client.messages.waitAndRead(payload);
     case "artifacts.listLatest":

@@ -6,9 +6,21 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const cs = {
+  configurationAxes: {
+    effort: ["Úsilí"],
+    speed: ["Rychlost"],
+  },
+  configurationOptions: {
+    light: ["Nízká"],
+    medium: ["Střední"],
+    high: ["Vysoká"],
+    extraHigh: ["Velmi vysoká"],
+    standard: ["Standardní"],
+    fast: ["Rychlé"],
+  },
   composerTextbox: ["Chatovat s ChatGPT"],
   sendButton: ["Odeslat výzvu"],
   searchChatsButton: ["Hledat chaty"],
@@ -33,4 +45,5 @@ export const cs = {
   },
   signedInMarkers: ["Nový chat", "Hledat chaty", "Nedávné", "Historie chatu", "Projekty", "Chatovat s ChatGPT"],
   responseActions: ["Zkopírovat odpověď"],
+  stopControl: ["Zastavit odpovídání"],
 } satisfies LocaleContribution;

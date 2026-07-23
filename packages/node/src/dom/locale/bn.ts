@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const bn = {
+  configurationAxes: {
+    model: ["মডেল"],
+    effort: ["প্রচেষ্টা"],
+    speed: ["গতি"],
+  },
+  configurationOptions: {
+    light: ["লাইট"],
+    medium: ["মাঝারি"],
+    high: ["উচ্চ"],
+    extraHigh: ["অতি উচ্চ"],
+    standard: ["স্ট্যান্ডার্ড"],
+    fast: ["দ্রুত"],
+  },
   composerTextbox: ["যে কোন কিছু জিজ্ঞেস করুন…"],
   sendButton: ["প্রম্পট পাঠান"],
   searchChatsButton: ["চ্যাট খুঁজুন"],
@@ -34,4 +47,5 @@ export const bn = {
   },
   signedInMarkers: ["নতুন চ্যাট", "চ্যাট খুঁজুন", "সাম্প্রতিক", "চ্যাটের ইতিহাস", "প্রোজেক্ট", "যে কোন কিছু জিজ্ঞেস করুন…"],
   responseActions: ["উত্তর কপি করুন"],
+  stopControl: ["উত্তর থামান"],
 } satisfies LocaleContribution;

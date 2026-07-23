@@ -6,9 +6,22 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const sr = {
+  configurationAxes: {
+    model: ["Модел"],
+    effort: ["Ниво"],
+    speed: ["Брзина"],
+  },
+  configurationOptions: {
+    light: ["Лагано"],
+    medium: ["Средње"],
+    high: ["Високо"],
+    extraHigh: ["Веома високо"],
+    standard: ["Стандардно"],
+    fast: ["Брзо"],
+  },
   composerTextbox: ["Питај било шта"],
   sendButton: ["Пошаљи промпт"],
   searchChatsButton: ["Претражи ћаскања"],
@@ -18,8 +31,10 @@ export const sr = {
   addFilesOpenerCandidates: ["Додај датотеке и друго"],
   addPhotosFilesMenuItem: ["Отпреми фотографије и датотеке"],
   copyResponse: ["Копирај одговор"],
-  modeLabels: ["Веома високо"],
+  modeLabels: ["Веома високо", "Средње", "Високо"],
   modeOptions: {
+    medium: ["Средње"],
+    high: ["Високо"],
     extraHigh: ["Веома високо"],
   },
   modeOpenerExtra: ["Конфигуриши..."],
@@ -30,4 +45,5 @@ export const sr = {
   },
   signedInMarkers: ["Ново ћаскање", "Претражи ћаскања", "Скорашњи", "Историја ћаскања", "Пројекти", "Питај било шта"],
   responseActions: ["Копирај одговор"],
+  stopControl: ["Заустави одговарање"],
 } satisfies LocaleContribution;

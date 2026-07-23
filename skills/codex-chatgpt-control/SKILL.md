@@ -1,6 +1,6 @@
 ---
 name: codex-chatgpt-control
-description: Use when Codex agents need to operate visible ChatGPT web sessions through the codex-chatgpt-control SDK, including prompts, threads, files, downloads, reports, browser bridge blockers, and local source smokes.
+description: Use when Codex agents need to operate visible ChatGPT Chat or Work through the codex-chatgpt-control SDK, including verified configuration, prompts, tasks, progress, steering, files, artifacts, reports, blockers, and source smokes.
 ---
 
 # codex-chatgpt-control
@@ -18,6 +18,10 @@ This skill is for visible, user-directed ChatGPT workflows only. It is not an Op
 5. Ask for explicit user confirmation before public, destructive, third-party, paid, account-level, or externally visible actions.
 6. Redact run reports by default. Raw prompt/response content is opt-in only.
 7. Attach only files the user approved.
+8. Use official Codex capabilities for local repository editing, commands, tests, branches, and deployment. This SDK controls visible ChatGPT surfaces.
+9. When the user requests Chat or Work, call `experience.open` before
+   configuration or submission. Do not assume the currently visible pane is
+   already the requested experience.
 
 ## Focused GPT-5.6 Sol High Consultations
 
@@ -30,10 +34,12 @@ Keep both workflows in the single `codex-chatgpt-control` plugin; do not
 install or package the focused consultation skill as a separate plugin.
 
 The focused skill submits once with `messages.compose` and `messages.submit`,
-saves the exact thread URL and pre-submit turn baselines, then polls with
-metadata and reads the response. After a polling or browser-runtime timeout,
-reconnect to that same thread and recover by polling or reading; never
-resubmit the prompt.
+saves the exact claimed tab, canonical thread URL when available, and
+pre-submit turn baselines, and requires a unique, non-empty
+`<Start>...<End>` completion envelope. A missing end gate remains partial even
+if the reply is stable. After a polling or browser-runtime timeout, wait
+deliberately, reconnect to that same thread, and resume with the original
+baselines; never resubmit the prompt.
 
 ## Runtime Requirements
 
@@ -121,6 +127,51 @@ Instructions are visible prompt text by default. Use `instructionsMode` intentio
 - `metadata_only`: keep instructions local; they are not sent to ChatGPT.
 
 ## Common Workflows
+
+Inspect the visible Chat or Work surface:
+
+```ts
+const surface = await chatgpt.experience.detect();
+const capabilities = await chatgpt.configuration.inspect();
+```
+
+If a specific surface was requested, open it explicitly even when detection
+already returned a value:
+
+```ts
+await chatgpt.experience.open({ experience: "work" });
+```
+
+Current ChatGPT can expose Chat and Work as radios in a `Select chat surface`
+group and can hide that group inside an active Work task. The SDK verifies the
+checked pane, returns to home when required, and retains older selector
+fallbacks.
+
+Apply strict Work configuration and start a task once:
+
+```ts
+await chatgpt.configuration.apply({
+  experience: "work",
+  desired: {
+    model: "GPT-5.6 Sol",
+    effort: "High",
+    speed: "Standard"
+  },
+  strict: true
+});
+
+await chatgpt.work.start({
+  prompt: "Produce a decision-ready implementation brief.",
+  newTask: true,
+  wait: false,
+  read: false
+});
+```
+
+After submission use `chatgpt.work.status`, `work.wait`, `work.steer`,
+`work.readLatest`, and `work.artifacts`; do not resubmit after an ambiguous
+timeout. Existing `mode` inputs and `modes.set/get` remain supported, while new
+code should prefer `experience` and strict `configuration`.
 
 Ask in a new or selected thread:
 
@@ -224,9 +275,30 @@ Use `format: "normalized_text"` only for compact assertions, polling checks, or 
 For long GPT-5.6 Sol High, Thinking, Deep Research, or file-backed answers,
 poll with `chatgpt.messages.wait({ responseContent: "metadata", ... })` so
 repeated partial polls return status metadata instead of re-emitting the growing
-answer body. Call `readLatest({ format: "markdown" })` once the wait confirms
-completion. If the browser runtime resets, reopen the saved thread URL and
-recover without resubmitting the prompt.
+answer body. For a response with an explicit completion envelope:
+
+```ts
+const wait = await chatgpt.messages.wait({
+  afterAssistantTurnCount,
+  afterTurnCount,
+  responseContent: "metadata",
+  completionGate: {
+    start: "<Start>",
+    end: "<End>",
+    requireUnique: true,
+    requireNonEmptyBody: true
+  }
+});
+```
+
+The gate augments the normal generation, stability, response-action, and turn
+baseline checks. A missing or malformed gate remains partial. Once the wait
+reports `completionGate.status === "complete"`, call
+`readLatest({ format: "visible_text" })` without `maxChars` and independently
+validate the same envelope before stripping it. If the browser runtime resets,
+pause, reclaim the saved tab when no canonical URL exists, reopen the saved
+canonical thread URL only after both original baselines advance, and recover
+without resubmitting the prompt.
 
 ## Python Client
 
@@ -289,4 +361,20 @@ cd packages/python
 python -m unittest discover -s tests
 python -m compileall -q src examples
 python scripts/live_smoke.py --mode ordinary-shell
+```
+
+Before claiming the expansion is live-qualified, run its reusable canary from
+a bridge-enabled runtime:
+
+```bash
+CHATGPT_E2E_SCENARIOS="chat-work-expansion" npm run smoke:live
+```
+
+The opt-in configuration mutation canary restores the original Work effort and
+Chat pane in a `finally` path:
+
+```bash
+CHATGPT_E2E_CONFIGURATION_MUTATION=1 \
+CHATGPT_E2E_SCENARIOS="configuration-mutate-restore" \
+npm run smoke:live
 ```

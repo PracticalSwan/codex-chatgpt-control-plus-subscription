@@ -49,7 +49,7 @@ python scripts/live_smoke.py \
   --backend-command "node scripts/http_stdio_relay.mjs"
 ```
 
-Keep the bridge-hosted JS execution active while Python runs. If that call returns first, browser operations can fail with `node_repl exec context not found`.
+Create the backend server and wait on it in the **same** bridge-hosted JS execution. Starting it in one Node REPL call and waiting in another loses the first call's browser execution context. Keep that single call active while Python runs. If it returns first, browser operations can fail with `node_repl exec context not found`.
 
 ## `login_required`
 
@@ -68,6 +68,24 @@ Return the visible limit text and stop unless the user asks to wait or try a dif
 The ChatGPT UI changed or the page loaded an unexpected surface. Return visible menu/button candidates and a screenshot/DOM summary if available.
 
 Runner results surface this as `interruptions[0].type === "selector_drift"` with `blocker.candidates` when visible candidates were available. Do not retry automatically; ask the user or update selectors.
+
+For Chat/Work drift, capture only scoped capability evidence: composer label,
+main controls, configuration rows/options, locale, URL shape, selector profile,
+and observation date. Do not retain sidebar thread titles or conversation
+content. An unknown profile, missing axis, or unverified postcondition is a
+normal blocker during staged account/region/workspace rollouts.
+
+If `work.start` returns `work_new_task_control_not_found`, a task is already
+loaded and the SDK refused to append. Pass `newTask: false` only when the user
+intends to continue that exact task. If a Work submission returns partial or
+timeout, use `work.status`, `work.wait`, or `work.readLatest`; do not resubmit.
+
+On the current home page, inspect the `Select chat surface` Chat/Work radio
+group before diagnosing Work as unavailable. Once a Work task is active, that
+radio group can disappear; the compound model-plus-effort opener is the SDK's
+continuation evidence, while the visible Work task chrome can corroborate a
+manual diagnosis. `experience.open` returns to the home selector before
+changing panes from an active task.
 
 ## Existing Tab Not Found Or Ambiguous
 
@@ -115,7 +133,7 @@ Use `readLatest({ format: "markdown" })`, `copyLatest()`, or the default SDK `re
 
 ## Long Responses Return `partial`
 
-Long GPT-5.6 Sol High, Thinking, Deep Research, or file-backed answers can take longer than the default wait window. Treat `status: "partial"` and `data.complete: false` as an incomplete capture even when `output_text` is non-empty. For repeated polling, prefer `messages.wait({ responseContent: "metadata", ... })` so Codex receives compact status metadata instead of the same growing partial answer body. Re-run `messages.wait(...)` on the same thread until completion is confirmed, then call `readLatest(...)` or `copyLatest(...)` once.
+Long Sol High, Thinking, Deep Research, or file-backed answers can take longer than the default wait window. Treat `status: "partial"` and `data.complete: false` as an incomplete capture even when `output_text` is non-empty. Check `data.completionState` and `data.generationActive`; `completionState: "generating"` or `generationActive: true` means ChatGPT is still running and the prompt must not be resubmitted. For repeated polling, prefer `messages.status({ maxPreviewChars })` for a cheap snapshot, or `messages.wait({ responseContent: "metadata", ... })` so Codex receives compact status metadata instead of the same growing partial answer body. Re-run `messages.wait(...)` on the same thread (with a larger timeout if needed) until completion is confirmed, then call `readLatest(...)` or `copyLatest(...)` once.
 
 Recommended long-answer wait:
 
@@ -125,24 +143,54 @@ await chatgpt.messages.wait({
   stableMs: 2_000,
   pollMs: 1_000,
   mode: "deep_research",
-  responseContent: "metadata"
+  responseContent: "metadata",
+  completionGate: {
+    start: "<Start>",
+    end: "<End>",
+    requireUnique: true,
+    requireNonEmptyBody: true
+  }
 });
 
-const final = await chatgpt.messages.readLatest({ format: "markdown" });
+const final = await chatgpt.messages.readLatest({ format: "visible_text" });
 ```
 
-## Consultation Runtime Timeout Recovery
+Active generation may appear as a visible or accessible-name control such as
+`Stop answering`, `Stop generating`, or `Stop streaming`. Stopped generation
+may appear as disabled or non-button latest-turn/status UI such as `Stopped
+thinking`. The detector excludes assistant message prose from these state
+signals. Treat all genuine generation signals as incomplete states.
 
-For a focused GPT-5.6 Sol High consultation, retain the submitted thread URL and
-the pre-submit total and assistant turn counts. If the browser kernel or
-automation runtime resets, reconnect to the visible browser, reopen that exact
-thread, then run another bounded `messages.wait(...)` and
-`messages.readLatest(...)`. Do not compose or submit the prompt again. Treat a
-response as captured only when `read.ok` is true and both turn counts advanced
-beyond the saved baselines.
+When a caller configures a completion gate, a missing end boundary remains
+partial even after the response text stabilizes and generation controls
+disappear. `data.completionGate.status` distinguishes missing, duplicated,
+misplaced, empty, and complete envelopes. Invalid boundary configuration
+returns `InvalidCompletionGate` and should be fixed rather than retried.
+An unchanged incomplete gate is cached by response length/hash; a new full-text
+evaluation occurs only after the compact polling snapshot changes.
 
+For focused recovery, preserve the exact claimed tab id, canonical thread URL
+when available, and both pre-submit turn baselines. Delay before each retry,
+reopen that exact thread, and call `messages.wait` again with the same gate.
+Never compose or submit during recovery. Use unclipped `visible_text` for the
+final independent boundary check; `maxChars` clipping can remove the end
+boundary, and serialized Markdown or HTML is not the authority for literal
+angle-bracket markers.
 
-Active generation may appear as a visible or accessible-name control such as `Stop answering`, `Stop generating`, or `Stop streaming`. Stopped generation may appear as `Stopped thinking`. Treat all of those as incomplete states.
+An immediate post-submit `/c/WEB:...` URL is provisional. Continue polling the
+claimed page until context returns a canonical conversation URL before using
+`threads.open` for recovery. If the runtime fails before that, bootstrap only
+the saved tab id and accept its URL only after both original turn baselines
+advance; otherwise return a blocker without resubmitting.
+
+When the outer host tool-call ceiling is short, poll in bounded chunks instead of issuing a single very long wait:
+
+```ts
+const status = await chatgpt.messages.status({ maxPreviewChars: 400 });
+if (status.data?.completionState === "generating" || status.data?.generationActive) {
+  await chatgpt.messages.wait({ timeoutMs: 30000, stableMs: 8000, pollMs: 1000 });
+}
+```
 
 `maxChars` limits captured text returned by the SDK. It does not control ChatGPT generation. When set and clipping occurs, inspect result warnings and `data.captureLimit`, then rerun without `maxChars` for full capture.
 
@@ -152,7 +200,14 @@ When ChatGPT exposes previous/next response controls, `readLatest` and `copyLate
 
 ## Download Unavailable
 
-The command only downloads visible files with a download affordance. If no download control exists, ask ChatGPT to create or expose the file again.
+The command only downloads visible files with a download affordance. Current
+ChatGPT file answers may first expose a filename-labelled button; the SDK opens
+that artifact preview and then uses its visible Download control. When the
+expected filename is known, pass a case-insensitive regular expression such as
+`filenamePattern: "^report\\.csv$"`. A `download_filename_not_found` blocker
+means no visible assistant file matched; the SDK deliberately did not accept an
+unrelated image fallback. If no download control exists, ask ChatGPT to create
+or expose the file again.
 
 ## Redacted Reports
 
@@ -179,5 +234,5 @@ Doctor also supports opt-in scenario checks:
 - `existing_tab`: claims only the requested already-open tab target by default and reports `existing_tab_not_found` / `existing_tab_ambiguous` diagnostics without opening a replacement tab unless `existingTab.ifMissing` explicitly allows that.
 - `artifacts`: verifies current-page artifact selector/download/asset support without requesting generation.
 - `file_preflight`: validates supplied local file paths without opening ChatGPT or attempting upload. It reports path count, total bytes, duplicate warnings, zero-byte blockers, and extension-based MIME/category metadata; fatal local file problems map to the same structured blockers as `files.preflight`.
-- `localization`: checks locale-label registry readiness and English canonical labels without changing the ChatGPT account language; it is not yet proof of full localized selector coverage.
+- `localization`: checks locale-label registry readiness and English canonical labels without changing the ChatGPT account language. It reports running-state label coverage (`stopControl` and `stoppedAssistant`) separately so English-only, partial, and complete live-capture coverage are visible. It is not yet proof of full localized selector coverage.
 - `reports`: checks redacted-report policy and existing destination writability when possible without writing a report.

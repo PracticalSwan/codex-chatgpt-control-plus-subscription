@@ -6,9 +6,21 @@ import type { LocaleContribution } from "./types.js";
  *
  * Some non-Intelligence surfaces may still fall back to English + `selector_drift`.
  *
- * Intelligence picker labels updated 2026-07-13 from a visible ChatGPT Plus session.
+ * Intelligence picker labels updated 2026-06-10, stop-control labels updated 2026-06-15, and Chat/Work surface labels updated 2026-07-17 from visible ChatGPT sessions.
  */
 export const tr = {
+  configurationAxes: {
+    effort: ["Düzey"],
+    speed: ["Hız"],
+  },
+  configurationOptions: {
+    light: ["Sınırlı"],
+    medium: ["Orta"],
+    high: ["Yüksek"],
+    extraHigh: ["Çok Yüksek"],
+    standard: ["Standart"],
+    fast: ["Hızlı"],
+  },
   composerTextbox: ["Herhangi bir şey sor"],
   sendButton: ["Prompt gönder"],
   searchChatsButton: ["Sohbetlerde ara"],
@@ -18,9 +30,9 @@ export const tr = {
   addFilesOpenerCandidates: ["Dosyaları ve çok daha fazlasını ekle"],
   addPhotosFilesMenuItem: ["Fotoğraf ve dosya yükle"],
   copyResponse: ["Yanıtı kopyala"],
-  modeLabels: ["Anında", "Orta", "Yüksek", "Çok Yüksek"],
+  modeLabels: ["Anında", "Orta", "Yüksek", "Çok Yüksek", "Hızlı"],
   modeOptions: {
-    instant: ["Anında"],
+    instant: ["Anında", "Hızlı"],
     medium: ["Orta"],
     high: ["Yüksek"],
     extraHigh: ["Çok Yüksek"],
@@ -33,4 +45,5 @@ export const tr = {
   },
   signedInMarkers: ["Yeni sohbet", "Sohbetlerde ara", "Yakın zamandakiler", "Sohbet geçmişi", "Projeler", "Herhangi bir şey sor"],
   responseActions: ["Yanıtı kopyala"],
+  stopControl: ["Yanıtlamayı durdur"],
 } satisfies LocaleContribution;

@@ -31,33 +31,57 @@ export async function readAssistantGenerationState(page: PageLike): Promise<Assi
           && style.opacity !== "0"
           && element.getAttribute("aria-hidden") !== "true";
       };
+      const elementText = (element: HTMLElement) => [
+        element.innerText,
+        element.textContent,
+        element.getAttribute("aria-label"),
+        element.getAttribute("title")
+      ].map(normalize).filter(Boolean).join(" ");
       const visibleButtons = Array.from(document.querySelectorAll("button"))
-        .filter((button): button is HTMLButtonElement => isVisible(button as HTMLElement)
-          && button.disabled !== true
-          && button.getAttribute("aria-disabled") !== "true");
-      const buttonTexts = visibleButtons
-        .map(button => [
-          button.innerText,
-          button.textContent,
-          button.getAttribute("aria-label"),
-          button.getAttribute("title")
-        ].map(normalize).filter(Boolean).join(" "))
+        .filter((button): button is HTMLButtonElement => isVisible(button as HTMLElement));
+      const activeButtonTexts = visibleButtons
+        .filter(button => button.disabled !== true && button.getAttribute("aria-disabled") !== "true")
+        .map(button => elementText(button))
         .filter(Boolean);
-      // Only live controls signal generation. Assistant prose can legitimately
-      // contain words such as "cancel" or "stop" and must not keep polling in
-      // a false generating state.
-      const haystacks = buttonTexts;
-      const matchingSignals = (phrases: string[]) => haystacks.flatMap(text =>
+      const turns = Array.from(document.querySelectorAll("[data-testid^='conversation-turn']"));
+      const latestAssistantTurn = [...turns].reverse().find(turn =>
+        turn.querySelector("[data-message-author-role='assistant']") !== null
+      ) as HTMLElement | undefined;
+      const explicitStatusElements = Array.from(document.querySelectorAll(
+        "[role='status'],[aria-live],[data-testid*='status'],[data-testid*='stopped']"
+      ));
+      const latestTurnUiElements = latestAssistantTurn === undefined
+        ? []
+        : Array.from(latestAssistantTurn.querySelectorAll("*"));
+      const stoppedUiTexts = [...new Set([...latestTurnUiElements, ...explicitStatusElements]
+        .filter((element): element is HTMLElement => {
+          const htmlElement = element as HTMLElement;
+          const insideMessageProse = typeof htmlElement.closest === "function"
+            && htmlElement.closest("[data-message-author-role]") !== null;
+          const containsMessageProse = typeof htmlElement.querySelector === "function"
+            && htmlElement.querySelector("[data-message-author-role]") !== null;
+          return !insideMessageProse && !containsMessageProse && isVisible(htmlElement);
+        })
+        .map(element => elementText(element))
+        .filter(Boolean))];
+      // Active generation is control-scoped so assistant prose containing "stop"
+      // cannot keep a wait alive. Stopped-generation labels may be disabled or
+      // rendered as non-button status UI, so inspect the latest turn and explicit
+      // status surfaces after excluding all assistant message prose.
+      const matchingSignals = (texts: string[], phrases: string[]) => texts.flatMap(text =>
         phrases
           .map(phrase => phrase.toLowerCase())
           .filter(phrase => text.includes(phrase))
       );
-      const activeSignals = matchingSignals(args.stop);
-      const stoppedSignals = matchingSignals(args.stopped);
+      const activeSignals = matchingSignals(activeButtonTexts, args.stop);
+      const stoppedSignals = matchingSignals(stoppedUiTexts, args.stopped);
+      const diagnosticTexts = [...activeButtonTexts, ...stoppedUiTexts]
+        .filter(text => [...args.stop, ...args.stopped].some(phrase => text.includes(phrase.toLowerCase())))
+        .map(text => text.slice(0, 160));
       return {
         active: activeSignals.length > 0,
         stopped: stoppedSignals.length > 0,
-        signals: [...new Set([...activeSignals, ...stoppedSignals, ...buttonTexts.filter(text => /stop|cancel|stopped|answering|thinking/i.test(text))])].slice(0, 5)
+        signals: [...new Set([...activeSignals, ...stoppedSignals, ...diagnosticTexts])].slice(0, 5)
       };
     }, {
       stop: [...localeLabels.stopControl],

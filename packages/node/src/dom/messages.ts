@@ -13,7 +13,7 @@ import type {
 } from "../types.js";
 import { extractRoleMessageHtml, formatMessageHtml, normalizeResponseFormat } from "./message-format.js";
 import { localeLabels } from "./locale-labels.js";
-import { normalizeWhitespace } from "./visible-text.js";
+import { normalizeLineBreaks, normalizeWhitespace } from "./visible-text.js";
 
 export type MessageRole = "user" | "assistant";
 
@@ -96,6 +96,22 @@ export async function readLatestMessage(
   maxChars?: number
 ): Promise<ExtractedMessage | undefined> {
   if (typeof page.evaluate === "function") {
+    const normalizedFormat = normalizeResponseFormat(format);
+    if (normalizedFormat === "visible_text" || normalizedFormat === "normalized_text") {
+      const directText = await page.evaluate((wantedRole: MessageRole) => {
+        const __directLatestMessageText = true;
+        void __directLatestMessageText;
+        const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
+        const node = nodes.at(-1) as HTMLElement | undefined;
+        return node?.innerText ?? node?.textContent ?? undefined;
+      }, role).catch(() => undefined);
+
+      if (directText !== undefined) {
+        const metadata = await readLatestMessageMetadata(page, role);
+        return formatDirectTextMessage(role, directText, normalizedFormat, maxChars, metadata);
+      }
+    }
+
     const message = await page.evaluate((wantedRole: MessageRole) => {
       const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
       const node = nodes.at(-1);
@@ -198,4 +214,72 @@ function normalizeExtractedMessage(
   const metadataHtml = message.role === "assistant" ? message.metadataHtml : undefined;
   const content = formatMessageHtml(message.html, normalizeResponseFormat(args.format), args.maxChars, metadataHtml);
   return { role: message.role, ...content };
+}
+
+async function readLatestMessageMetadata(
+  page: PageLike,
+  role: MessageRole
+): Promise<{ role: MessageRole; html: string; metadataHtml?: string } | undefined> {
+  return page.evaluate?.((wantedRole: MessageRole) => {
+    const __latestMessageMetadata = true;
+    void __latestMessageMetadata;
+    const nodes = Array.from(document.querySelectorAll(`[data-message-author-role="${wantedRole}"]`));
+    const node = nodes.at(-1);
+    if (node === undefined) return undefined;
+    const turn = node.closest("[data-testid^='conversation-turn']");
+    if (turn === null) return { role: wantedRole, html: "" };
+    const metadataOnly = turn.cloneNode(true) as Element;
+    for (const messageNode of Array.from(metadataOnly.querySelectorAll("[data-message-author-role]"))) {
+      messageNode.remove();
+    }
+    return {
+      role: wantedRole,
+      html: "",
+      metadataHtml: metadataOnly.outerHTML
+    };
+  }, role).catch(() => undefined);
+}
+
+function formatDirectTextMessage(
+  role: MessageRole,
+  directText: string,
+  format: "visible_text" | "normalized_text",
+  maxChars?: number,
+  metadata?: { role: MessageRole; html: string; metadataHtml?: string }
+): ExtractedMessage {
+  const visibleText = normalizeLineBreaks(directText).trim();
+  const normalizedText = normalizeWhitespace(visibleText);
+  const rawText = format === "visible_text" ? visibleText : normalizedText;
+  const captureLimit = maxChars === undefined
+    ? undefined
+    : {
+        maxChars,
+        originalChars: rawText.length,
+        clipped: rawText.length > maxChars
+      };
+  const text = captureLimit?.clipped === true ? rawText.slice(0, maxChars) : rawText;
+  const result: ExtractedMessage = {
+    role,
+    text,
+    format,
+    source: "semantic_dom",
+    fidelity: format
+  };
+  if (format === "visible_text") result.visibleText = text;
+  else result.normalizedText = text;
+  if (captureLimit !== undefined) result.captureLimit = captureLimit;
+  if (captureLimit?.clipped === true) {
+    result.warnings = [
+      `Response captured text was clipped by maxChars=${captureLimit.maxChars} from ${captureLimit.originalChars} characters.`
+    ];
+  }
+
+  if (metadata !== undefined) {
+    const extracted = normalizeExtractedMessage(metadata, { role, format });
+    if (extracted.branch !== undefined) result.branch = extracted.branch;
+    if (extracted.actions !== undefined) result.actions = extracted.actions;
+    if (extracted.thoughtDurationText !== undefined) result.thoughtDurationText = extracted.thoughtDurationText;
+    if (extracted.sourcesAvailable !== undefined) result.sourcesAvailable = extracted.sourcesAvailable;
+  }
+  return result;
 }

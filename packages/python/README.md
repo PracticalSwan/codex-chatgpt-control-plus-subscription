@@ -1,6 +1,6 @@
 # codex-chatgpt-control Python SDK
 
-Python parity client for Codex agents controlling visible ChatGPT web sessions through the shared Node backend protocol.
+Python parity client for controlling visible ChatGPT Chat and Work through the shared Node backend protocol.
 
 Unofficial project: not affiliated with, endorsed by, or sponsored by OpenAI. This is not an OpenAI API wrapper and does not call hidden or private ChatGPT endpoints.
 
@@ -10,30 +10,9 @@ Python SDK -> backend protocol -> Node runtime -> browser bridge -> visible chat
 
 The current browser-control runtime is Node/TypeScript. Python talks to it through a long-lived local stdio backend service. This is intentionally not a pure-Python browser-control runtime yet.
 
-## Install From This Fork
-
-```bash
-git clone https://github.com/PracticalSwan/codex-chatgpt-control-plus-subscription.git
-cd codex-chatgpt-control-plus-subscription/packages/python
-python -m pip install -e .
-```
-
-The Python package needs a Node backend command for browser-control workflows.
-Build it from the same checkout:
-
-```bash
-cd ../node
-npm ci
-npm run bundle:backend
-```
-
-The GPT-5.6 Sol High Intelligence consultation workflow is shipped through the
-repository's Codex plugin. The upstream PyPI and npm packages do not install
-this fork's focused workflow.
-
 ## Development Install
 
-Build the backend bundle first:
+Build the backend bundle from this fork first:
 
 ```bash
 cd ../node
@@ -47,6 +26,9 @@ Install the Python package:
 cd ../python
 python -m pip install -e .[dev]
 ```
+
+The upstream registry packages do not contain this fork's GPT-5.6 Sol High
+consultation and response-gate changes.
 
 ## Sync Usage
 
@@ -94,11 +76,61 @@ The `ChatGPT` facade exposes workflows and primitive command groups:
 - `chatgpt.run_plan({"name": "new-ask-read", ...})`
 - `chatgpt.doctor(...)`
 - `chatgpt.reports.create(...)`
-- `chatgpt.session`, `threads`, `messages`, `files`, `projects.sources`, `modes`, `tools`, `response`
+- `chatgpt.session`, `experience`, `configuration`, `work`, `threads`, `messages`, `artifacts`, `files`, `projects.sources`, `modes`, `tools`, `response`
 - `chatgpt.commands()`, `describe(...)`, `help(...)`
 - `chatgpt.explain_blocker(result_or_blocker, ...)` and module-level `explain_blocker(...)`
 
 Unsupported OpenAI API-only Responses fields, such as `model`, `temperature`, and `previous_response_id`, return explicit unsupported responses instead of silently submitting misleading prompts.
+
+Inspect and control Chat or Work with the same sync/async surface:
+
+```python
+surface = chatgpt.experience.detect()
+capabilities = chatgpt.configuration.inspect(experience="work")
+
+applied = chatgpt.configuration.apply(
+    experience="work",
+    desired={
+        "model": "GPT-5.6 Sol",
+        "effort": "High",
+        "speed": "Standard",
+    },
+    strict=True,
+)
+
+started = chatgpt.work.start(
+    prompt="Produce a decision-ready implementation brief.",
+    new_task=True,
+    wait=False,
+    read=False,
+)
+```
+
+Use `work.status`, `work.wait`, `work.steer`, `work.read_latest`, and
+`work.artifacts` after submission. Legacy `modes` APIs remain available for
+existing callers.
+
+Python forwards the Node runtime's optional completion envelope without
+reimplementing browser logic:
+
+```python
+waited = chatgpt.messages.wait(
+    after_assistant_turn_count=after_assistant_turn_count,
+    after_turn_count=after_turn_count,
+    response_content="metadata",
+    completion_gate={
+        "start": "<Start>",
+        "end": "<End>",
+        "require_unique": True,
+        "require_non_empty_body": True,
+    },
+)
+```
+
+Treat every result other than
+`waited.data["completionGate"]["status"] == "complete"` as incomplete. Resume
+the same thread with the original baselines after a delay; never resubmit the
+prompt. Read unclipped `visible_text` only after the gated wait succeeds.
 
 ## Blocker Explainability
 
